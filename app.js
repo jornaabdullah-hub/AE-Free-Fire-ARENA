@@ -1,56 +1,1112 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js";
+
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  onAuthStateChanged,
+  signOut
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  addDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+
 import { firebaseConfig, ADMIN_EMAIL } from "./firebase-config.js";
+
+// =====================================
+// FIREBASE INITIALIZATION
+// =====================================
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const functions = getFunctions(app, "asia-south1");
-const $ = id => document.getElementById(id);
-let currentUser = null, isAdmin = false, tournaments = [], stopWallet = null, stopEntries = null, stopHistory = null, stopSettings = null;
-const call = name => httpsCallable(functions, name);
-const money = n => "৳" + Number(n || 0).toLocaleString("en-BD");
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const dateText = v => { try { return v?.toDate ? v.toDate().toLocaleString() : new Date(v).toLocaleString(); } catch { return "Date pending"; } };
-function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),2600); }
-function message(id,msg){ $(id).textContent=msg; }
-function open(id){ $(id).showModal(); }
-function close(id){ $(id).close(); }
-document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>close(b.dataset.close)));
-$("year").textContent=new Date().getFullYear();
-$("menuToggle").onclick=()=>$("mainNav").classList.toggle("open");
-$("loginOpen").onclick=()=>showAuth(false);
-$("signupOpen").onclick=()=>showAuth(true);
-$("heroSignup").onclick=()=>showAuth(true);
-$("switchAuth").onclick=()=>showAuth($("authTitle").textContent==="Player Login");
-$("logoutBtn").onclick=()=>signOut(auth);
-function showAuth(signup){ $("authTitle").textContent=signup?"Create Player Account":"Player Login"; $("authSubmit").textContent=signup?"Create Account":"Login"; $("nameWrap").classList.toggle("hidden",!signup); $("ffWrap").classList.toggle("hidden",!signup); $("phoneWrap").classList.toggle("hidden",!signup); $("authPassword").autocomplete=signup?"new-password":"current-password"; $("switchAuth").textContent=signup?"Already have an account? Login":"Create a new account"; message("authMessage",""); open("authDialog"); }
-$("authForm").addEventListener("submit",async e=>{e.preventDefault(); const signup=$("authTitle").textContent!=="Player Login"; const email=$("authEmail").value.trim().toLowerCase(), password=$("authPassword").value; const btn=$("authSubmit"); btn.disabled=true; try{ if(signup){ const name=$("authName").value.trim(), ffUID=$("authFFUID").value.trim(), phone=$("authPhone").value.trim(); if(!name||!ffUID||!phone) throw Error("Please complete all player details."); const cred=await createUserWithEmailAndPassword(auth,email,password); await setDoc(doc(db,"users",cred.user.uid),{uid:cred.user.uid,email,name,ffUID,phone,createdAt:serverTimestamp()}); }else await signInWithEmailAndPassword(auth,email,password); close("authDialog"); toast(signup?"Account created. Welcome!":"Login successful."); }catch(err){message("authMessage",err.message||"Authentication failed.");}finally{btn.disabled=false;} });
-onAuthStateChanged(auth,async user=>{currentUser=user; isAdmin=!!user&&user.email?.toLowerCase()===ADMIN_EMAIL.toLowerCase(); $("loginOpen").classList.toggle("hidden",!!user); $("signupOpen").classList.toggle("hidden",!!user); $("logoutBtn").classList.toggle("hidden",!user); $("playerArea").classList.toggle("hidden",!user); $("signedOutWallet").classList.toggle("hidden",!!user); $("adminSection").classList.toggle("hidden",!isAdmin); $("playerEmail").textContent=user?.email||""; loadSettings(); if(stopWallet)stopWallet();if(stopEntries)stopEntries();if(stopHistory)stopHistory(); if(user){ if(isAdmin) loadAdmin(); else loadPlayer(); } else { $("balanceValue").textContent=money(0); $("myTournaments").textContent="No tournament entries yet."; $("walletHistory").textContent="No transactions yet."; } });
 
-function loadTournaments(){ return onSnapshot(query(collection(db,"tournaments"),orderBy("createdAt","desc")),snap=>{tournaments=snap.docs.map(d=>({id:d.id,...d.data()})); renderTournaments(); if(isAdmin)renderAdminTournaments();},err=>{console.error(err);$("tournamentGrid").innerHTML='<div class="empty-state">Unable to load tournaments. Check Firestore rules.</div>';});}
-const stopTournaments=loadTournaments();
-function renderTournaments(){ if(!tournaments.length){$("tournamentGrid").innerHTML='<div class="empty-state">No tournaments published yet. Check back soon!</div>';return;} $("tournamentGrid").innerHTML=tournaments.map(t=>`<article class="tournament-card"><div class="tournament-banner" style="${t.imageUrl?`background-image:linear-gradient(#07132666,#07132699),url('${esc(t.imageUrl)}')`:""}">${t.imageUrl?"":esc(t.mode||"BR")}</div><div class="tournament-content"><h3>${esc(t.name)}</h3><p>${esc(t.description||"Join the battle and compete for the prize pool.")}</p><div class="meta-grid"><div class="meta"><small>MODE</small><b>${esc(t.mode||"BR")}</b></div><div class="meta"><small>ENTRY FEE</small><b>${money(t.entryFee)}</b></div><div class="meta"><small>PRIZE POOL</small><b>${money(t.prizePool)}</b></div><div class="meta"><small>MATCH TIME</small><b>${esc(t.matchTime||"To be announced")}</b></div></div><button class="btn btn-primary full-width" data-join="${esc(t.id)}" ${t.status!=="open"?"disabled":""}>${t.status==="open"?"JOIN NOW":"CLOSED"}</button></div></article>`).join(""); document.querySelectorAll("[data-join]").forEach(b=>b.onclick=()=>joinTournament(b.dataset.join));}
-async function joinTournament(id){if(!currentUser){showAuth(false);return;} if(isAdmin){toast("Use a player account to join.");return;} const t=tournaments.find(x=>x.id===id);if(!t)return; $("joinTournamentId").value=id;$("joinTitle").textContent=t.name;$("joinDetails").textContent=`Entry fee ${money(t.entryFee)} • Prize ${money(t.prizePool)} • ${t.mode}`; message("joinMessage",""); try{const p=await getDoc(doc(db,"users",currentUser.uid));const d=p.data()||{};$("joinPlayerName").value=d.name||"";$("joinFFUID").value=d.ffUID||"";$("joinContact").value=d.phone||"";}catch{} open("joinDialog");}
-$("joinForm").onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{const result=await call("joinTournament")({tournamentId:$("joinTournamentId").value,playerName:$("joinPlayerName").value.trim(),ffUID:$("joinFFUID").value.trim(),contact:$("joinContact").value.trim()});message("joinMessage",result.data.message||"Joined successfully.");toast("Tournament entry submitted.");setTimeout(()=>close("joinDialog"),1000);}catch(err){message("joinMessage",err.message||"Could not join tournament.");}finally{b.disabled=false;}};
+const $ = (id) => document.getElementById(id);
 
-function loadPlayer(){stopWallet=onSnapshot(doc(db,"wallets",currentUser.uid),s=>$("balanceValue").textContent=money(s.data()?.balance||0),e=>console.error(e));stopEntries=onSnapshot(query(collection(db,"registrations"),where("playerUid","==",currentUser.uid)),s=>{$("myTournaments").innerHTML=s.empty?"No tournament entries yet.":s.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.tournamentName)}</b><small>${esc(x.playerName)} • ${dateText(x.createdAt)}</small></div><span class="status">${esc(x.status||"Pending")}</span></div>`}).join("");},e=>console.error(e));stopHistory=onSnapshot(query(collection(db,"transactions"),where("uid","==",currentUser.uid),orderBy("createdAt","desc")),s=>{$("walletHistory").innerHTML=s.empty?"No transactions yet.":s.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.title||x.type||"Transaction")}</b><small>${dateText(x.createdAt)}</small></div><b>${x.direction==="credit"?"+":"−"}${money(x.amount)}</b></div>`}).join("");},e=>{$("walletHistory").textContent="History unavailable.";console.error(e);});}
-$("depositOpen").onclick=()=>showMoney("deposit");$("withdrawOpen").onclick=()=>showMoney("withdraw");
-function showMoney(type){$("moneyType").value=type;$("moneyTitle").textContent=type==="deposit"?"Deposit Request":"Withdraw Request";$("senderWrap").classList.toggle("hidden",type!=="deposit");$("trxWrap").classList.toggle("hidden",type!=="deposit");$("withdrawWrap").classList.toggle("hidden",type!=="withdraw");message("moneyMessage","");open("moneyDialog");}
-$("moneyForm").onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await call("createMoneyRequest")({type:$("moneyType").value,amount:Number($("moneyAmount").value),method:$("moneyMethod").value,sender:$("moneySender").value.trim(),trxId:$("moneyTrx").value.trim(),payoutNumber:$("moneyPayout").value.trim()});message("moneyMessage","Request submitted. Admin review is required.");toast("Request submitted.");setTimeout(()=>close("moneyDialog"),1200);$("moneyForm").reset();}catch(err){message("moneyMessage",err.message||"Request failed.");}finally{b.disabled=false;}};
+let currentUser = null;
+let isAdmin = false;
+let tournaments = [];
+let selectedCategory = "ALL";
+let editingTournamentId = null;
+let unsubscribeTournaments = null;
+let unsubscribeMyMatches = null;
+let unsubscribeSettings = null;
 
-function loadAdmin(){loadAdminRequests();loadAdminPlayers();loadSettings();renderAdminTournaments();}
-function renderAdminTournaments(){if(!isAdmin)return;$("adminTournamentList").innerHTML=tournaments.map(t=>`<div class="list-row"><div><b>${esc(t.name)}</b><small>${esc(t.mode)} • ${money(t.entryFee)} entry • ${money(t.prizePool)} prize</small></div><div class="admin-inline"><button class="small-btn" data-edit="${t.id}">Edit</button><button class="small-btn danger" data-delete="${t.id}">Delete</button></div></div>`).join("")||"No tournaments yet.";document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editTournament(b.dataset.edit));document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=()=>deleteTournament(b.dataset.delete));}
-function editTournament(id){const t=tournaments.find(x=>x.id===id);if(!t)return;$("tournamentId").value=id;$("tName").value=t.name||"";$("tMode").value=t.mode||"BR";$("tFee").value=t.entryFee||0;$("tPrize").value=t.prizePool||0;$("tTime").value=t.matchTimeInput||"";$("tSlots").value=t.slots||48;$("tImage").value=t.imageUrl||"";$("tDescription").value=t.description||"";$("tStatus").value=t.status||"open";$("tabTournament").scrollIntoView({behavior:"smooth"});}
-$("tReset").onclick=()=>$("tournamentForm").reset();
-$("tournamentForm").onsubmit=async e=>{e.preventDefault();try{const id=$("tournamentId").value;const payload={name:$("tName").value.trim(),mode:$("tMode").value,entryFee:Number($("tFee").value),prizePool:Number($("tPrize").value),matchTime:$("tTime").value?new Date($("tTime").value).toLocaleString():"To be announced",matchTimeInput:$("tTime").value,slots:Number($("tSlots").value),imageUrl:$("tImage").value.trim(),description:$("tDescription").value.trim(),status:$("tStatus").value,updatedAt:serverTimestamp()};if(!payload.name||payload.entryFee<0||payload.prizePool<0)throw Error("Check tournament details.");if(id)await updateDoc(doc(db,"tournaments",id),payload);else await addDoc(collection(db,"tournaments"),{...payload,createdAt:serverTimestamp()});$("tournamentForm").reset();$("tournamentId").value="";toast("Tournament saved.");}catch(err){toast(err.message||"Save failed.");}};
-async function deleteTournament(id){if(!confirm("Delete this tournament? Existing player records will remain."))return;try{await deleteDoc(doc(db,"tournaments",id));toast("Tournament deleted.");}catch(e){toast(e.message);}}
-function loadAdminRequests(){onSnapshot(query(collection(db,"money_requests"),where("status","==","Pending"),orderBy("createdAt","asc")),s=>{$("adminRequests").innerHTML=s.empty?"No pending requests.":s.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.type)} • ${money(x.amount)}</b><small>${esc(x.email)} • ${esc(x.method)} • ${esc(x.sender||x.payoutNumber||"")} • ${esc(x.trxId||"")}</small></div><div class="admin-inline"><button class="small-btn" data-review="${d.id}" data-decision="approve">Approve</button><button class="small-btn danger" data-review="${d.id}" data-decision="reject">Reject</button></div></div>`}).join("");document.querySelectorAll("[data-review]").forEach(b=>b.onclick=()=>reviewRequest(b.dataset.review,b.dataset.decision));},e=>{console.error(e);$("adminRequests").textContent="Could not load requests.";});}
-async function reviewRequest(id,decision){if(!confirm(`${decision} this request?`))return;try{await call("reviewMoneyRequest")({requestId:id,decision});toast("Request updated.");}catch(e){toast(e.message||"Could not update request.");}}
-function loadAdminPlayers(){onSnapshot(query(collection(db,"users"),orderBy("createdAt","desc")),s=>{$("adminPlayers").innerHTML=s.empty?"No players yet.":s.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • UID ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small></div><button class="small-btn" data-balance="${d.id}">Adjust balance</button></div>`}).join("");document.querySelectorAll("[data-balance]").forEach(b=>b.onclick=()=>adjustBalance(b.dataset.balance));},e=>{console.error(e);$("adminPlayers").textContent="Could not load players.";});}
-async function adjustBalance(uid){const raw=prompt("Enter amount to add (positive) or subtract (negative), in BDT:");if(raw===null)return;const amount=Number(raw);if(!Number.isFinite(amount)||amount===0)return toast("Invalid amount.");try{await call("adminAdjustBalance")({uid,amount,reason:"Admin manual adjustment"});toast("Balance adjusted.");}catch(e){toast(e.message||"Balance adjustment failed.");}}
-function loadSettings(){if(stopSettings)stopSettings();stopSettings=onSnapshot(doc(db,"site_settings","public"),s=>{const d=s.data()||{};if(d.notice){$("noticeArea").classList.remove("hidden");$("noticeText").textContent=d.notice;}else $("noticeArea").classList.add("hidden");$("contactDetails").innerHTML=[d.phone?`<a href="tel:${esc(d.phone)}">Phone: ${esc(d.phone)}</a>`:"",d.whatsapp?`<a target="_blank" rel="noopener" href="${esc(d.whatsapp)}">WhatsApp</a>`:"",d.facebook?`<a target="_blank" rel="noopener" href="${esc(d.facebook)}">Facebook</a>`:"",d.youtube?`<a target="_blank" rel="noopener" href="${esc(d.youtube)}">YouTube</a>`:""].filter(Boolean).join("")||"Contact information will be updated by admin.";if(isAdmin){$("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";$("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";$("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";}},e=>console.error(e));}
-$("settingsForm").onsubmit=async e=>{e.preventDefault();try{await setDoc(doc(db,"site_settings","public"),{notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),updatedAt:serverTimestamp()},{merge:true});toast("Website settings saved.");}catch(e){toast(e.message||"Settings save failed.");}};
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===b));["tabTournament","tabRequests","tabPlayers","tabSettings"].forEach(id=>$(id).classList.toggle("hidden",id!==b.dataset.tab));});
+// =====================================
+// HELPERS
+// =====================================
+
+function showToast(message) {
+  const toast = $("toast");
+  if (!toast) {
+    alert(message);
+    return;
+  }
+
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => {
+    toast.classList.add("hidden");
+  }, 3500);
+}
+
+function showMessage(id, message, error = false) {
+  const element = $(id);
+  if (!element) return;
+
+  element.textContent = message;
+  element.style.color = error ? "#dc2626" : "#16a34a";
+}
+
+function setText(id, value) {
+  const element = $(id);
+  if (element) element.textContent = value ?? "";
+}
+
+function setValue(id, value) {
+  const element = $(id);
+  if (element) element.value = value ?? "";
+}
+
+function escapeHTML(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char]);
+}
+
+function formatDate(value) {
+  if (!value) return "Not set";
+
+  const date = value.toDate
+    ? value.toDate()
+    : new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "Not set";
+
+  return date.toLocaleString("en-BD", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}
+
+function getCategoryName(category) {
+  const names = {
+    BR: "BR Match",
+    CS: "Clash Squad",
+    LW: "Lone Wolf",
+    LTW: "Lose to Win",
+    LWND: "LW No Damage",
+    "1HP": "1 HP Mode",
+    FREE: "Free Match"
+  };
+
+  return names[category] || category || "Tournament";
+}
+
+function show(element) {
+  if (element) element.classList.remove("hidden");
+}
+
+function hide(element) {
+  if (element) element.classList.add("hidden");
+}
+
+function openDialog(id) {
+  const dialog = $(id);
+  if (dialog && typeof dialog.showModal === "function") {
+    dialog.showModal();
+  }
+}
+
+function closeDialog(id) {
+  const dialog = $(id);
+  if (dialog && typeof dialog.close === "function") {
+    dialog.close();
+  }
+}
+
+function getErrorMessage(error) {
+  const messages = {
+    "auth/email-already-in-use": "এই Email দিয়ে আগে Account খোলা হয়েছে। Login করো।",
+    "auth/invalid-email": "সঠিক Email Address দাও।",
+    "auth/weak-password": "Password কমপক্ষে 6 অক্ষরের হতে হবে।",
+    "auth/invalid-credential": "Email অথবা Password ভুল হয়েছে।",
+    "auth/user-not-found": "এই Email দিয়ে Account পাওয়া যায়নি।",
+    "auth/wrong-password": "Password ভুল হয়েছে।",
+    "auth/too-many-requests": "অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করো।",
+    "auth/network-request-failed": "Internet Connection পরীক্ষা করো।",
+    "permission-denied": "Firebase Rules অনুমতি দেয়নি। Firestore Rules পরীক্ষা করো।",
+    "failed-precondition": "Firebase Index বা Database Configuration পরীক্ষা করো।"
+  };
+
+  return messages[error.code] ||
+    error.message ||
+    "সমস্যা হয়েছে। আবার চেষ্টা করো।";
+}
+
+// =====================================
+// AUTHENTICATION
+// =====================================
+
+let authMode = "login";
+
+function setAuthMode(mode) {
+  authMode = mode;
+
+  setText("authTitle", mode === "signup" ? "Create Account" : "Login");
+
+  setText(
+    "authSubmit",
+    mode === "signup" ? "Create Account" : "Login"
+  );
+
+  setText(
+    "switchAuth",
+    mode === "signup"
+      ? "Already have an account? Login"
+      : "Create a new account"
+  );
+
+  if (mode === "signup") {
+    show($("nameWrap"));
+    show($("ffWrap"));
+    show($("phoneWrap"));
+  } else {
+    hide($("nameWrap"));
+    hide($("ffWrap"));
+    hide($("phoneWrap"));
+  }
+
+  showMessage("authMessage", "");
+}
+
+$("switchAuth")?.addEventListener("click", () => {
+  setAuthMode(authMode === "login" ? "signup" : "login");
+});
+
+$("loginOpen")?.addEventListener("click", () => {
+  setAuthMode("login");
+  openDialog("authDialog");
+});
+
+$("signupOpen")?.addEventListener("click", () => {
+  setAuthMode("signup");
+  openDialog("authDialog");
+});
+
+$("logoutBtn")?.addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+    showToast("Logout successful");
+  } catch (error) {
+    showToast(getErrorMessage(error));
+  }
+});
+
+$("authForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const email = $("authEmail")?.value.trim().toLowerCase();
+  const password = $("authPassword")?.value;
+
+  if (!email || !password) {
+    showMessage("authMessage", "Email ও Password দাও।", true);
+    return;
+  }
+
+  try {
+    if (authMode === "signup") {
+      const name = $("authName")?.value.trim();
+      const ffUID = $("authFFUID")?.value.trim();
+      const phone = $("authPhone")?.value.trim();
+
+      if (!name || !ffUID || !phone) {
+        showMessage("authMessage", "সব তথ্য পূরণ করো।", true);
+        return;
+      }
+
+      const credential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+
+      await setDoc(doc(db, "users", credential.user.uid), {
+        uid: credential.user.uid,
+        email,
+        name,
+        ffUID,
+        phone,
+        createdAt: serverTimestamp()
+      });
+
+      await sendEmailVerification(credential.user);
+
+      showMessage(
+        "authMessage",
+        "Account তৈরি হয়েছে! Email Inbox থেকে Verification করে Login করো।"
+      );
+
+      await signOut(auth);
+      setAuthMode("login");
+      return;
+    }
+
+    const credential = await signInWithEmailAndPassword(
+      auth,
+      email,
+      password
+    );
+
+    if (!credential.user.emailVerified) {
+      await sendEmailVerification(credential.user);
+      await signOut(auth);
+
+      showMessage(
+        "authMessage",
+        "তোমার Email এখনো Verify হয়নি। Inbox থেকে Verification করো।",
+        true
+      );
+      return;
+    }
+
+    closeDialog("authDialog");
+    showToast("Login successful");
+
+  } catch (error) {
+    showMessage("authMessage", getErrorMessage(error), true);
+  }
+});
+
+// =====================================
+// AUTH STATE
+// =====================================
+
+onAuthStateChanged(auth, async (user) => {
+  currentUser = user;
+  isAdmin = false;
+
+  if (user && user.emailVerified) {
+    isAdmin =
+      user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  }
+
+  updateAuthUI();
+
+  if (user && user.emailVerified) {
+    await loadPlayerProfile();
+    loadMyMatches();
+  } else {
+    if (unsubscribeMyMatches) {
+      unsubscribeMyMatches();
+      unsubscribeMyMatches = null;
+    }
+
+    setText("myTournaments", "Login করলে তোমার Joined Matches দেখা যাবে।");
+  }
+});
+
+function updateAuthUI() {
+  const loggedIn = Boolean(currentUser && currentUser.emailVerified);
+
+  show($("loginOpen"));
+  show($("signupOpen"));
+  hide($("logoutBtn"));
+
+  if (loggedIn) {
+    hide($("loginOpen"));
+    hide($("signupOpen"));
+    show($("logoutBtn"));
+  }
+
+  if (isAdmin) {
+    show($("adminSection"));
+  } else {
+    hide($("adminSection"));
+  }
+
+  if (loggedIn) {
+    hide($("signedOutWallet"));
+    show($("playerArea"));
+    setText("playerEmail", currentUser.email);
+  } else {
+    show($("signedOutWallet"));
+    hide($("playerArea"));
+    setText("playerEmail", "");
+    setText("playerName", "");
+    setText("playerFFUID", "");
+  }
+}
+
+async function loadPlayerProfile() {
+  if (!currentUser) return;
+
+  try {
+    const profileRef = doc(db, "users", currentUser.uid);
+    const profileSnap = await getDoc(profileRef);
+
+    if (profileSnap.exists()) {
+      const profile = profileSnap.data();
+
+      setText("playerName", profile.name || "Player");
+      setText("playerFFUID", profile.ffUID || "Not added");
+      setText("playerEmail", currentUser.email);
+    } else {
+      setText("playerName", currentUser.displayName || "Player");
+      setText("playerFFUID", "Not added");
+    }
+  } catch (error) {
+    console.error("Profile error:", error);
+  }
+}
+
+// =====================================
+// TOURNAMENT LIST
+// =====================================
+
+function startTournamentListener() {
+  if (unsubscribeTournaments) unsubscribeTournaments();
+
+  const tournamentsRef = collection(db, "tournaments");
+  const q = query(tournamentsRef, orderBy("createdAt", "desc"));
+
+  unsubscribeTournaments = onSnapshot(
+    q,
+    (snapshot) => {
+      tournaments = snapshot.docs.map((item) => ({
+        id: item.id,
+        ...item.data()
+      }));
+
+      renderTournaments();
+      updateCategoryCounts();
+      renderAdminTournamentList();
+    },
+    (error) => {
+      console.error("Tournament listener:", error);
+      showToast(getErrorMessage(error));
+    }
+  );
+}
+
+function renderTournaments() {
+  const grid = $("tournamentGrid");
+  if (!grid) return;
+
+  const filtered = tournaments.filter((tournament) => {
+    if (selectedCategory === "ALL") return true;
+    return tournament.mode === selectedCategory;
+  });
+
+  if (!filtered.length) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        No tournaments available right now.
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = filtered.map((tournament) => {
+    const image = tournament.image
+      ? `<img src="${escapeHTML(tournament.image)}"
+           alt="Tournament"
+           loading="lazy"
+           onerror="this.style.display='none'">`
+      : "";
+
+    const status = tournament.status || "open";
+    const isOpen = status === "open";
+    const fee = Number(tournament.entryFee || 0);
+
+    return `
+      <article class="tournament-card">
+        ${image}
+
+        <div class="tournament-content">
+          <span class="status ${isOpen ? "open" : "closed"}">
+            ${isOpen ? "OPEN" : escapeHTML(status.toUpperCase())}
+          </span>
+
+          <h3>${escapeHTML(tournament.name || "Tournament")}</h3>
+
+          <p>${escapeHTML(getCategoryName(tournament.mode))}</p>
+
+          <div class="tournament-info">
+            <span>Entry: FREE</span>
+            <span>Prize: ${escapeHTML(tournament.prizePool || "0")}</span>
+            <span>Slots: ${Number(tournament.slots || 0)}</span>
+          </div>
+
+          <p>${escapeHTML(tournament.description || "")}</p>
+
+          <p>${escapeHTML(formatDate(tournament.startTime))}</p>
+
+          <button
+            class="btn join-btn"
+            data-join="${escapeHTML(tournament.id)}"
+            ${!isOpen ? "disabled" : ""}
+          >
+            ${isOpen ? "Join Now" : "Closed"}
+          </button>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("[data-join]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openJoinDialog(button.dataset.join);
+    });
+  });
+}
+
+function updateCategoryCounts() {
+  const categories = ["BR", "CS", "LW", "LTW", "LWND", "1HP", "FREE"];
+
+  categories.forEach((category) => {
+    const count = tournaments.filter(
+      (tournament) => tournament.mode === category
+    ).length;
+
+    setText("count" + category, count);
+  });
+}
+
+// Category filter buttons
+document.querySelectorAll("[data-category]").forEach((button) => {
+  button.addEventListener("click", () => {
+    selectedCategory = button.dataset.category || "ALL";
+    renderTournaments();
+
+    document.querySelectorAll("[data-category]").forEach((item) => {
+      item.classList.remove("active");
+    });
+
+    button.classList.add("active");
+  });
+});
+
+// =====================================
+// JOIN TOURNAMENT
+// =====================================
+
+let selectedTournament = null;
+
+function openJoinDialog(tournamentId) {
+  if (!currentUser || !currentUser.emailVerified) {
+    showToast("প্রথমে Login করে Email Verify করো।");
+    setAuthMode("login");
+    openDialog("authDialog");
+    return;
+  }
+
+  selectedTournament = tournaments.find(
+    (tournament) => tournament.id === tournamentId
+  );
+
+  if (!selectedTournament) {
+    showToast("Tournament পাওয়া যায়নি।");
+    return;
+  }
+
+  if (selectedTournament.status !== "open") {
+    showToast("এই Tournament এখন বন্ধ।");
+    return;
+  }
+
+  if (Number(selectedTournament.entryFee || 0) !== 0) {
+    showToast("এই Free Version-এ শুধু Free Tournament Join করা যাবে।");
+    return;
+  }
+
+  setValue("joinTournamentId", tournamentId);
+  setText("joinTitle", selectedTournament.name || "Join Tournament");
+
+  setText(
+    "joinDetails",
+    `${getCategoryName(selectedTournament.mode)} | FREE Entry`
+  );
+
+  setValue("joinPlayerName", $("playerName")?.textContent || "");
+  setValue("joinFFUID", $("playerFFUID")?.textContent || "");
+
+  openDialog("joinDialog");
+}
+
+$("joinForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!currentUser || !currentUser.emailVerified || !selectedTournament) {
+    showMessage("joinMessage", "আবার Login করে চেষ্টা করো।", true);
+    return;
+  }
+
+  const playerName = $("joinPlayerName")?.value.trim();
+  const ffUID = $("joinFFUID")?.value.trim();
+  const contact = $("joinContact")?.value.trim();
+
+  if (!playerName || !ffUID || !contact) {
+    showMessage("joinMessage", "সব তথ্য পূরণ করো।", true);
+    return;
+  }
+
+  try {
+    const tournamentRef = doc(
+      db,
+      "tournaments",
+      selectedTournament.id
+    );
+
+    const latestTournament = await getDoc(tournamentRef);
+
+    if (!latestTournament.exists()) {
+      throw new Error("Tournament পাওয়া যায়নি।");
+    }
+
+    const latestData = latestTournament.data();
+
+    if (latestData.status !== "open") {
+      throw new Error("Tournament বন্ধ হয়ে গেছে।");
+    }
+
+    if (Number(latestData.entryFee || 0) !== 0) {
+      throw new Error("শুধু Free Tournament Join করা যাবে।");
+    }
+
+    // Check previous registration for this player
+    const registrationQuery = query(
+      collection(db, "registrations"),
+      where("playerUid", "==", currentUser.uid)
+    );
+
+    const registrations = await getDocs(registrationQuery);
+
+    const alreadyJoined = registrations.docs.some(
+      (item) => item.data().tournamentId === selectedTournament.id
+    );
+
+    if (alreadyJoined) {
+      throw new Error("তুমি এই Tournament আগেই Join করেছো।");
+    }
+
+    const slotLimit = Number(latestData.slots || 0);
+
+    const tournamentRegistrations = await getDocs(
+      query(
+        collection(db, "registrations"),
+        where("tournamentId", "==", selectedTournament.id)
+      )
+    );
+
+    if (
+      slotLimit > 0 &&
+      tournamentRegistrations.size >= slotLimit
+    ) {
+      throw new Error("সব Slot পূর্ণ হয়ে গেছে।");
+    }
+
+    await addDoc(collection(db, "registrations"), {
+      tournamentId: selectedTournament.id,
+      tournamentName: latestData.name || "",
+      playerUid: currentUser.uid,
+      playerName,
+      ffUID,
+      contact,
+      entryFee: 0,
+      status: "Pending",
+      createdAt: serverTimestamp()
+    });
+
+    closeDialog("joinDialog");
+    showToast("Tournament Join Request সফল হয়েছে!");
+
+  } catch (error) {
+    showMessage("joinMessage", getErrorMessage(error), true);
+  }
+});
+
+// =====================================
+// PLAYER MY MATCHES
+// =====================================
+
+function loadMyMatches() {
+  if (!currentUser) return;
+
+  if (unsubscribeMyMatches) unsubscribeMyMatches();
+
+  const q = query(
+    collection(db, "registrations"),
+    where("playerUid", "==", currentUser.uid)
+  );
+
+  unsubscribeMyMatches = onSnapshot(
+    q,
+    (snapshot) => {
+      const container = $("myTournaments");
+      if (!container) return;
+
+      if (snapshot.empty) {
+        container.innerHTML = "<p>You have not joined any tournaments yet.</p>";
+        return;
+      }
+
+      container.innerHTML = snapshot.docs.map((item) => {
+        const data = item.data();
+
+        return `
+          <div class="list-row">
+            <strong>${escapeHTML(data.tournamentName || "Tournament")}</strong>
+            <span>${escapeHTML(data.status || "Pending")}</span>
+            <small>FF UID: ${escapeHTML(data.ffUID || "")}</small>
+          </div>
+        `;
+      }).join("");
+    },
+    (error) => {
+      console.error("My matches error:", error);
+      showToast(getErrorMessage(error));
+    }
+  );
+}
+
+// =====================================
+// ADMIN: CREATE / EDIT TOURNAMENT
+// =====================================
+
+function requireAdmin() {
+  if (!currentUser || !currentUser.emailVerified || !isAdmin) {
+    showToast("শুধু Verified Admin এই কাজ করতে পারবে।");
+    return false;
+  }
+
+  return true;
+}
+
+$("tournamentForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!requireAdmin()) return;
+
+  const name = $("tName")?.value.trim();
+  const mode = $("tMode")?.value;
+  const prizePool = $("tPrize")?.value.trim() || "0";
+  const startTime = $("tTime")?.value;
+  const slots = Number($("tSlots")?.value || 0);
+  const image = $("tImage")?.value.trim() || "";
+  const description = $("tDescription")?.value.trim() || "";
+  const status = $("tStatus")?.value || "open";
+
+  if (!name || !mode || !startTime || slots <= 0) {
+    showToast("Tournament-এর প্রয়োজনীয় তথ্য পূরণ করো।");
+    return;
+  }
+
+  try {
+    const tournamentData = {
+      name,
+      mode,
+      entryFee: 0,
+      prizePool,
+      startTime,
+      slots,
+      image,
+      description,
+      status,
+      updatedAt: serverTimestamp()
+    };
+
+    if (editingTournamentId) {
+      await updateDoc(
+        doc(db, "tournaments", editingTournamentId),
+        tournamentData
+      );
+
+      showToast("Tournament Update হয়েছে!");
+    } else {
+      tournamentData.createdAt = serverTimestamp();
+
+      await addDoc(
+        collection(db, "tournaments"),
+        tournamentData
+      );
+
+      showToast("নতুন Tournament তৈরি হয়েছে!");
+    }
+
+    editingTournamentId = null;
+    $("tournamentForm").reset();
+    setText("tReset", "Reset Form");
+
+  } catch (error) {
+    showToast(getErrorMessage(error));
+  }
+});
+
+$("tReset")?.addEventListener("click", () => {
+  editingTournamentId = null;
+  $("tournamentForm")?.reset();
+});
+
+function renderAdminTournamentList() {
+  const container = $("adminTournamentList");
+  if (!container) return;
+
+  if (!isAdmin) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (!tournaments.length) {
+    container.innerHTML = "<p>No tournaments created.</p>";
+    return;
+  }
+
+  container.innerHTML = tournaments.map((tournament) => `
+    <div class="list-row">
+      <div>
+        <strong>${escapeHTML(tournament.name || "Tournament")}</strong>
+        <small>${escapeHTML(getCategoryName(tournament.mode))}</small>
+        <small>Entry: FREE</small>
+      </div>
+
+      <div class="admin-inline">
+        <button class="small-btn" data-edit="${escapeHTML(tournament.id)}">
+          Edit
+        </button>
+
+        <button class="small-btn danger" data-delete="${escapeHTML(tournament.id)}">
+          Delete
+        </button>
+      </div>
+    </div>
+  `).join("");
+
+  container.querySelectorAll("[data-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      editTournament(button.dataset.edit);
+    });
+  });
+
+  container.querySelectorAll("[data-delete]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteTournament(button.dataset.delete);
+    });
+  });
+}
+
+function editTournament(id) {
+  if (!requireAdmin()) return;
+
+  const tournament = tournaments.find((item) => item.id === id);
+  if (!tournament) return;
+
+  editingTournamentId = id;
+
+  setValue("tName", tournament.name);
+  setValue("tMode", tournament.mode);
+  setValue("tFee", "0");
+  setValue("tPrize", tournament.prizePool);
+  setValue("tSlots", tournament.slots);
+  setValue("tImage", tournament.image);
+  setValue("tDescription", tournament.description);
+  setValue("tStatus", tournament.status);
+
+  if (tournament.startTime) {
+    const date = new Date(tournament.startTime);
+    if (!Number.isNaN(date.getTime())) {
+      const localDate = new Date(
+        date.getTime() - date.getTimezoneOffset() * 60000
+      ).toISOString().slice(0, 16);
+
+      setValue("tTime", localDate);
+    }
+  }
+
+  setText("tReset", "Cancel Edit");
+
+  $("tName")?.scrollIntoView({
+    behavior: "smooth",
+    block: "center"
+  });
+}
+
+async function deleteTournament(id) {
+  if (!requireAdmin()) return;
+
+  if (!confirm("এই Tournament Delete করতে চাও?")) return;
+
+  try {
+    await deleteDoc(doc(db, "tournaments", id));
+    showToast("Tournament Delete হয়েছে।");
+  } catch (error) {
+    showToast(getErrorMessage(error));
+  }
+}
+
+// =====================================
+// ADMIN: PLAYER LIST
+// =====================================
+
+async function loadAdminPlayers() {
+  if (!requireAdmin()) return;
+
+  const container = $("adminPlayersList");
+  if (!container) return;
+
+  try {
+    const snapshot = await getDocs(collection(db, "users"));
+
+    if (snapshot.empty) {
+      container.innerHTML = "<p>No players found.</p>";
+      return;
+    }
+
+    container.innerHTML = snapshot.docs.map((item) => {
+      const player = item.data();
+
+      return `
+        <div class="list-row">
+          <strong>${escapeHTML(player.name || "Player")}</strong>
+          <small>Email: ${escapeHTML(player.email || "")}</small>
+          <small>FF UID: ${escapeHTML(player.ffUID || "")}</small>
+          <small>Phone: ${escapeHTML(player.phone || "")}</small>
+        </div>
+      `;
+    }).join("");
+
+  } catch (error) {
+    container.textContent = getErrorMessage(error);
+  }
+}
+
+// =====================================
+// ADMIN TABS
+// =====================================
+
+function showAdminTab(tab) {
+  if (!requireAdmin()) return;
+
+  const tournamentPanel = $("adminTournamentPanel");
+  const playersPanel = $("adminPlayersPanel");
+  const settingsPanel = $("adminSettingsPanel");
+
+  hide(tournamentPanel);
+  hide(playersPanel);
+  hide(settingsPanel);
+
+  if (tab === "tournament") {
+    show(tournamentPanel);
+  } else if (tab === "players") {
+    show(playersPanel);
+    loadAdminPlayers();
+  } else if (tab === "settings") {
+    show(settingsPanel);
+    loadSettingsForm();
+  }
+
+  document.querySelectorAll(".admin-tabs button").forEach((button) => {
+    button.classList.remove("active");
+  });
+
+  $("tab" + tab.charAt(0).toUpperCase() + tab.slice(1))
+    ?.classList.add("active");
+}
+
+$("tabTournament")?.addEventListener("click", () => {
+  showAdminTab("tournament");
+});
+
+$("tabPlayers")?.addEventListener("click", () => {
+  showAdminTab("players");
+});
+
+$("tabSettings")?.addEventListener("click", () => {
+  showAdminTab("settings");
+});
+
+// =====================================
+// ADMIN: SITE SETTINGS
+// =====================================
+
+async function loadSettingsForm() {
+  if (!requireAdmin()) return;
+
+  try {
+    const snapshot = await getDoc(doc(db, "site_settings", "public"));
+
+    if (!snapshot.exists()) return;
+
+    const data = snapshot.data();
+
+    setValue("sNotice", data.notice || "");
+    setValue("sPhone", data.phone || "");
+    setValue("sWhatsApp", data.whatsapp || "");
+    setValue("sFacebook", data.facebook || "");
+    setValue("sYoutube", data.youtube || "");
+    setValue("sBanner", data.banner || "");
+
+  } catch (error) {
+    showToast(getErrorMessage(error));
+  }
+}
+
+$("settingsForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!requireAdmin()) return;
+
+  try {
+    await setDoc(
+      doc(db, "site_settings", "public"),
+      {
+        notice: $("sNotice")?.value.trim() || "",
+        phone: $("sPhone")?.value.trim() || "",
+        whatsapp: $("sWhatsApp")?.value.trim() || "",
+        facebook: $("sFacebook")?.value.trim() || "",
+        youtube: $("sYoutube")?.value.trim() || "",
+        banner: $("sBanner")?.value.trim() || "",
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    showToast("Website Settings Update হয়েছে!");
+
+  } catch (error) {
+    showToast(getErrorMessage(error));
+  }
+});
+
+// =====================================
+// PUBLIC SETTINGS LISTENER
+// =====================================
+
+function startSettingsListener() {
+  if (unsubscribeSettings) unsubscribeSettings();
+
+  unsubscribeSettings = onSnapshot(
+    doc(db, "site_settings", "public"),
+    (snapshot) => {
+      if (!snapshot.exists()) return;
+
+      const data = snapshot.data();
+
+      setText("noticeText", data.notice || "Welcome to AE FREE FIRE!");
+      setText("contactDetails", "");
+
+      const contact = $("contactDetails");
+
+      if (contact) {
+        const links = [];
+
+        if (data.phone) {
+          links.push(
+            `<p>Phone: ${escapeHTML(data.phone)}</p>`
+          );
+        }
+
+        if (data.whatsapp) {
+          const number = data.whatsapp.replace(/[^\d]/g, "");
+
+          links.push(
+            `<p><a href="https://wa.me/${escapeHTML(number)}" target="_blank" rel="noopener">WhatsApp Contact</a></p>`
+          );
+        }
+
+        if (data.facebook) {
+          links.push(
+            `<p><a href="${escapeHTML(data.facebook)}" target="_blank" rel="noopener">Facebook</a></p>`
+          );
+        }
+
+        if (data.youtube) {
+          links.push(
+            `<p><a href="${escapeHTML(data.youtube)}" target="_blank" rel="noopener">YouTube</a></p>`
+          );
+        }
+
+        contact.innerHTML = links.join("") || "Contact details coming soon.";
+      }
+
+      const banner = $("homeBanner");
+
+      if (banner && data.banner) {
+        banner.style.backgroundImage =
+          `linear-gradient(#0005,#0005), url("${data.banner.replace(/["\\]/g, "")}")`;
+        banner.style.backgroundSize = "cover";
+        banner.style.backgroundPosition = "center";
+      }
+    },
+    (error) => {
+      console.error("Settings listener:", error);
+    }
+  );
+}
+
+// =====================================
+// RESULTS
+// =====================================
+
+function renderResults() {
+  const container = $("resultsList");
+  if (!container) return;
+
+  const completed = tournaments.filter((tournament) =>
+    tournament.status === "completed" ||
+    tournament.result ||
+    tournament.winner
+  );
+
+  if (!completed.length) {
+    container.innerHTML = "<p>No results published yet.</p>";
+    return;
+  }
+
+  container.innerHTML = completed.map((tournament) => `
+    <div class="list-row">
+      <strong>${escapeHTML(tournament.name || "Tournament")}</strong>
+      <p>Winner: ${escapeHTML(tournament.winner || "Not announced")}</p>
+      <p>${escapeHTML(tournament.result || "")}</p>
+    </div>
+  `).join("");
+}
+
+// Update results when tournaments change
+const originalRenderTournaments = renderTournaments;
+renderTournaments = function () {
+  originalRenderTournaments();
+  renderResults();
+};
+
+// =====================================
+// INITIALIZE
+// =====================================
+
+startTournamentListener();
+startSettingsListener();
+
+setAuthMode("login");
+
+console.log("AE FREE FIRE app.js loaded successfully.");
