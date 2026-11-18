@@ -1,0 +1,10 @@
+{
+  "name": "AE FREE FIRE",
+  "short_name": "AE FREE FIRE",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#080d1c",
+  "theme_color": "#080d1c",
+  "description": "AE FREE FIRE Tournament Arena",
+  "icons": []
+}
