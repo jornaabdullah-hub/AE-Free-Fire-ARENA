@@ -1,10 +1,19 @@
 {
   "name": "AE FREE FIRE",
   "short_name": "AE FREE FIRE",
+  "description": "AE FREE FIRE Tournament Arena",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#080d1c",
   "theme_color": "#080d1c",
-  "description": "AE FREE FIRE Tournament Arena",
-  "icons": []
+  "icons": [
+    {
+      "src": "./icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }
