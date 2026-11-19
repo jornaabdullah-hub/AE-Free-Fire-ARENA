@@ -449,17 +449,17 @@ function loadAdminPlayers() {
   stops.adminPlayers=onSnapshot(q,snapshot=>{
     $("adminPlayers").innerHTML=snapshot.empty?'<div class="empty-state">No players yet.</div>':snapshot.docs.map(d=>{
       const x=d.data(), balance=Number(x.balance||0);
-      return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small><small><b>Balance: ${balance.toLocaleString()} points</b></small></div><div class="admin-inline"><button class="small-btn" data-balance="${esc(d.id)}" data-action="add" type="button">Add</button><button class="small-btn danger" data-balance="${esc(d.id)}" data-action="deduct" type="button">Deduct</button></div></div>`;
+      return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small><small><b>${balance.toLocaleString()}</b></small></div><div class="admin-inline"><button class="small-btn" data-balance="${esc(d.id)}" data-action="add" type="button">Add</button><button class="small-btn danger" data-balance="${esc(d.id)}" data-action="deduct" type="button">Deduct</button></div></div>`;
     }).join("");
     document.querySelectorAll("[data-balance]").forEach(b=>b.onclick=()=>adjustPlayerBalance(b.dataset.balance,b.dataset.action));
   },error=>{$("adminPlayers").textContent="Player list load হয়নি: "+error.message;console.error(error);});
 }
 async function adjustPlayerBalance(uid,action) {
   if(!isAdmin || !uid) return;
-  const raw=prompt(action==="add"?"কত points যোগ করবে?":"কত points কমাবে?");
+  const raw=prompt(action==="add"?"কত পরিমাণ যোগ করবে?":"কত পরিমাণ কমাবে?");
   if(raw===null)return;
   const amount=Number(raw);
-  if(!Number.isSafeInteger(amount)||amount<=0){toast("শুধু 1 বা তার বেশি পূর্ণসংখ্যা points লিখো।");return;}
+  if(!Number.isSafeInteger(amount)||amount<=0){toast("শুধু 1 বা তার বেশি পূর্ণসংখ্যা লিখো।");return;}
   const userRef=doc(db,C.users,uid), logRef=doc(collection(db,C.balanceHistory));
   try {
     await runTransaction(db,async tx=>{
@@ -479,7 +479,7 @@ async function loadPlayerBalanceHistory(uid) {
     const snap=await getDocs(q);
     $("playerBalanceHistory").innerHTML=snap.empty?'<div class="empty-state">No balance activity yet.</div>':snap.docs.map(d=>{
       const x=d.data(),amount=Number(x.amount||0);
-      return `<div class="list-row"><div><b>${amount>0?"+":""}${amount} points</b><small>${esc(x.action||"Balance update")} • ${niceDate(x.createdAt)}</small></div><span class="status ${amount>=0?"approved":"rejected"}">${Number(x.newBalance||0)} total</span></div>`;
+      return `<div class="list-row"><div><b>${amount>0?"+":""}${amount}</b><small>${esc(x.action||"Balance update")} • ${niceDate(x.createdAt)}</small></div><span class="status ${amount>=0?"approved":"rejected"}">${Number(x.newBalance||0)} total</span></div>`;
     }).join("");
   } catch(error){console.error("Balance history:",error);$("playerBalanceHistory").textContent="Balance history load হয়নি: "+error.message;}
 }
