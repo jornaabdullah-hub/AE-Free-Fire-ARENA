@@ -19,6 +19,7 @@ const C = {
   results: "results", settings: "site_settings"
 };
 let currentUser = null, isAdmin = false, tournaments = [], activeCategory = "All";
+let authIsSignup = false, adminLoginRequested = false;
 let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null };
 let toastTimer = null;
 
@@ -59,6 +60,12 @@ $("year").textContent = new Date().getFullYear();
 $("menuToggle").addEventListener("click", () => $("mainNav").classList.toggle("open"));
 document.querySelectorAll("#mainNav a").forEach(a => a.addEventListener("click", () => $("mainNav").classList.remove("open")));
 $("loginOpen").addEventListener("click", () => showAuth(false));
+$("adminLoginOpen").addEventListener("click", () => {
+  showAuth(false);
+  adminLoginRequested = true;
+  $("authTitle").textContent = "Admin Login";
+  $("switchAuth").classList.add("hidden");
+});
 $("signupOpen").addEventListener("click", () => showAuth(true));
 $("heroSignup").addEventListener("click", () => showAuth(true));
 $("logoutBtn").addEventListener("click", async () => {
@@ -67,10 +74,13 @@ $("logoutBtn").addEventListener("click", async () => {
 $("switchAuth").addEventListener("click", () => showAuth($("authTitle").textContent === "Player Login"));
 
 function showAuth(signup) {
+  authIsSignup = signup;
+  adminLoginRequested = false;
   $("authTitle").textContent = signup ? "Create Player Account" : "Player Login";
   $("authSubmit").textContent = signup ? "Create Account" : "Login";
   ["nameWrap","ffWrap","phoneWrap"].forEach(id => $(id).classList.toggle("hidden", !signup));
   $("authPassword").autocomplete = signup ? "new-password" : "current-password";
+  $("switchAuth").classList.remove("hidden");
   $("switchAuth").textContent = signup ? "Already have an account? Login" : "Create a new account";
   setMessage("authMessage", "");
   showDialog("authDialog");
@@ -78,7 +88,7 @@ function showAuth(signup) {
 
 $("authForm").addEventListener("submit", async event => {
   event.preventDefault();
-  const signup = $("authTitle").textContent !== "Player Login";
+  const signup = authIsSignup;
   const button = $("authSubmit");
   const email = $("authEmail").value.trim().toLowerCase();
   const password = $("authPassword").value;
@@ -103,8 +113,12 @@ $("authForm").addEventListener("submit", async event => {
         await signOut(auth);
         throw new Error("আগে email verification সম্পন্ন করে আবার Login করো।");
       }
+      if (adminLoginRequested && !isAdminUser(credential.user)) {
+        await signOut(auth);
+        throw new Error("এই account-টি Admin account নয়। Admin email দিয়ে Login করো।");
+      }
       closeDialog("authDialog");
-      toast("Login successful.");
+      toast(adminLoginRequested ? "Admin login successful." : "Login successful.");
     }
   } catch (error) {
     setMessage("authMessage", error.message || "Authentication failed.");
@@ -115,6 +129,7 @@ onIdTokenChanged(auth, async user => {
   currentUser = user;
   isAdmin = isAdminUser(user);
   $("loginOpen").classList.toggle("hidden", !!user);
+  $("adminLoginOpen").classList.toggle("hidden", !!user);
   $("signupOpen").classList.toggle("hidden", !!user);
   $("logoutBtn").classList.toggle("hidden", !user);
   $("adminSection").classList.toggle("hidden", !isAdmin);
