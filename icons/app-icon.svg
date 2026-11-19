@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="90" fill="#080d1c"/>
+
+  <path d="M256 55 430 155 430 355 256 457 82 355 82 155Z"
+        fill="#d00028"/>
+
+  <path d="M145 330 220 155 267 155 342 330
+           290 330 276 293 211 293 197 330Z"
+        fill="#ffffff"/>
+
+  <path d="M229 248H258L244 211Z" fill="#d00028"/>
+
+  <text x="256" y="385"
+        font-size="42"
+        font-family="serif"
+        font-weight="bold"
+        text-anchor="middle"
+        fill="#ffffff">AE FREE FIRE</text>
+</svg>
