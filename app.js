@@ -53,7 +53,7 @@ function safeUrl(value) {
   catch { return ""; }
 }
 
-// Resize selected photos so the three website images remain small enough for Firestore.
+// Compress each uploaded image to keep the combined Firestore settings document below its 1 MiB limit.
 function compressImageFile(file) {
   return new Promise((resolve,reject)=>{
     if(!file || !file.type.startsWith("image/")) return reject(new Error("একটি image file নির্বাচন করো।"));
@@ -63,13 +63,13 @@ function compressImageFile(file) {
       const img=new Image();
       img.onerror=()=>reject(new Error("ছবিটি খোলা যাচ্ছে না।"));
       img.onload=()=>{
-        const maxW=900,maxH=600,scale=Math.min(1,maxW/img.width,maxH/img.height);
+        const maxW=480,maxH=320,scale=Math.min(1,maxW/img.width,maxH/img.height);
         const canvas=document.createElement("canvas");
         canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));
         const ctx=canvas.getContext("2d");ctx.drawImage(img,0,0,canvas.width,canvas.height);
-        let data=canvas.toDataURL("image/jpeg",0.62);
-        if(data.length>260000) data=canvas.toDataURL("image/jpeg",0.42);
-        if(data.length>300000) return reject(new Error("ছবিটি অনেক বড়। ছোট সাইজের ছবি ব্যবহার করো।"));
+        let data=canvas.toDataURL("image/jpeg",0.48);
+        if(data.length>76000) data=canvas.toDataURL("image/jpeg",0.32);
+        if(data.length>80000) return reject(new Error("ছবিটি ছোট সাইজে নিয়ে আবার চেষ্টা করো।"));
         resolve(data);
       };
       img.src=reader.result;
@@ -77,7 +77,14 @@ function compressImageFile(file) {
     reader.readAsDataURL(file);
   });
 }
-const pendingSiteImages={banner:null,brImage:null,csImage:null};
+const pendingSiteImages={banner:null,allImage:null,brImage:null,csImage:null,lwImage:null,ltwImage:null,lwndImage:null,hpImage:null,freeImage:null};
+const imagePickers=[
+  ["sBannerFile","sBannerPreview","banner"],["sAllFile","sAllPreview","allImage"],
+  ["sBRFile","sBRPreview","brImage"],["sCSFile","sCSPreview","csImage"],
+  ["sLWFile","sLWPreview","lwImage"],["sLTWFile","sLTWPreview","ltwImage"],
+  ["sLWNDFile","sLWNDPreview","lwndImage"],["s1HPFile","s1HPPreview","hpImage"],
+  ["sFREEFile","sFREEPreview","freeImage"]
+];
 function setupImagePicker(inputId,previewId,key){
   $(inputId).addEventListener("change",async()=>{
     const file=$(inputId).files?.[0];if(!file)return;
@@ -85,9 +92,7 @@ function setupImagePicker(inputId,previewId,key){
     catch(error){pendingSiteImages[key]=null;$(inputId).value="";toast(error.message||"ছবি প্রস্তুত করা যায়নি।");}
   });
 }
-setupImagePicker("sBannerFile","sBannerPreview","banner");
-setupImagePicker("sBRFile","sBRPreview","brImage");
-setupImagePicker("sCSFile","sCSPreview","csImage");
+imagePickers.forEach(([inputId,previewId,key])=>setupImagePicker(inputId,previewId,key));
 
 document.querySelectorAll("[data-close]").forEach(button => {
   button.addEventListener("click", () => closeDialog(button.dataset.close));
@@ -505,9 +510,12 @@ function loadSettings() {
     $("noticeText").textContent=d.notice||"";
     const banner=safeUrl(d.banner)||d.bannerData;
     $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428aa),url("${banner}")`:"";
-    const brArt=$("brCategoryArt"),csArt=$("csCategoryArt");
-    if(brArt){brArt.style.backgroundImage=d.brImage?`linear-gradient(#07132655,#07132655),url("${d.brImage}")`:"";brArt.textContent="BR";}
-    if(csArt){csArt.style.backgroundImage=d.csImage?`linear-gradient(#07132655,#07132655),url("${d.csImage}")`:"";csArt.textContent="CS";}
+    const categoryImages={All:d.allImage,BR:d.brImage,CS:d.csImage,LW:d.lwImage,LTW:d.ltwImage,LWND:d.lwndImage,"1HP":d.hpImage,FREE:d.freeImage};
+    document.querySelectorAll(".category-card[data-category]").forEach(card=>{
+      const art=card.querySelector(".category-art");if(!art)return;
+      const image=categoryImages[card.dataset.category];
+      art.style.backgroundImage=image?`linear-gradient(#07132655,#07132655),url("${image}")`:"";
+    });
     const contacts=[
       d.phone?`<a href="tel:${esc(d.phone)}">Phone: ${esc(d.phone)}</a>`:"",
       d.whatsapp?`<a target="_blank" rel="noopener" href="${esc(safeUrl(d.whatsapp))}">WhatsApp</a>`:"",
@@ -519,8 +527,8 @@ function loadSettings() {
       $("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";
       $("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";
       $("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";
-      const previews=[["sBannerPreview",d.bannerData||safeUrl(d.banner)],["sBRPreview",d.brImage||""],["sCSPreview",d.csImage||""]];
-      previews.forEach(([id,src])=>{const el=$(id);if(src){el.src=src;el.classList.remove("hidden");}else{el.removeAttribute("src");el.classList.add("hidden");}});
+      const previewValues={sBannerPreview:d.bannerData||safeUrl(d.banner),sAllPreview:d.allImage,sBRPreview:d.brImage,sCSPreview:d.csImage,sLWPreview:d.lwImage,sLTWPreview:d.ltwImage,sLWNDPreview:d.lwndImage,s1HPPreview:d.hpImage,sFREEPreview:d.freeImage};
+      Object.entries(previewValues).forEach(([id,src])=>{const el=$(id);if(src){el.src=src;el.classList.remove("hidden");}else{el.removeAttribute("src");el.classList.add("hidden");}});
     }
   },error=>{console.error("Settings:",error);});
 }
@@ -533,14 +541,20 @@ $("settingsForm").addEventListener("submit",async event=>{
       whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),
       youtube:$("sYoutube").value.trim(),banner:pendingSiteImages.banner?"":$("sBanner").value.trim(),
       ...(pendingSiteImages.banner?{bannerData:pendingSiteImages.banner}:{}),
+      ...(pendingSiteImages.allImage?{allImage:pendingSiteImages.allImage}:{}),
       ...(pendingSiteImages.brImage?{brImage:pendingSiteImages.brImage}:{}),
       ...(pendingSiteImages.csImage?{csImage:pendingSiteImages.csImage}:{}),
+      ...(pendingSiteImages.lwImage?{lwImage:pendingSiteImages.lwImage}:{}),
+      ...(pendingSiteImages.ltwImage?{ltwImage:pendingSiteImages.ltwImage}:{}),
+      ...(pendingSiteImages.lwndImage?{lwndImage:pendingSiteImages.lwndImage}:{}),
+      ...(pendingSiteImages.hpImage?{hpImage:pendingSiteImages.hpImage}:{}),
+      ...(pendingSiteImages.freeImage?{freeImage:pendingSiteImages.freeImage}:{}),
       updatedAt:serverTimestamp()
     },{merge:true});
-    pendingSiteImages.banner=null;pendingSiteImages.brImage=null;pendingSiteImages.csImage=null;
-    ["sBannerFile","sBRFile","sCSFile"].forEach(id=>$(id).value="");
-    toast("Website settings saved.");
-  } catch(error) { toast(error.message||"Settings save failed."); }
+    Object.keys(pendingSiteImages).forEach(key=>pendingSiteImages[key]=null);
+    imagePickers.forEach(([inputId])=>$(inputId).value="");
+    toast("Website settings saved. Reload করলেও ছবিগুলো থাকবে।");
+  } catch(error) { console.error("Save website settings:",error); toast(error.code?`${error.code}: ${error.message}`:(error.message||"Settings save failed.")); }
 });
 
 document.querySelectorAll(".tab").forEach(button=>button.addEventListener("click",()=>{
