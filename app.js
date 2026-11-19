@@ -6,7 +6,7 @@ import {
 import {
   getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc,
   updateDoc, deleteDoc, query, where, orderBy, onSnapshot,
-  serverTimestamp, limit
+  serverTimestamp, limit, runTransaction
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 import { firebaseConfig, ADMIN_EMAIL } from "./firebase-config.js";
 
@@ -16,12 +16,15 @@ const db = getFirestore(app);
 const $ = id => document.getElementById(id);
 const C = {
   tournaments: "tournaments", users: "users", registrations: "registrations",
-  results: "results", settings: "site_settings"
+  results: "results", settings: "site_settings", balanceHistory: "balance_history"
 };
 let currentUser = null, isAdmin = false, tournaments = [], activeCategory = "All";
 let authIsSignup = false, adminLoginRequested = false;
 let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null };
 let toastTimer = null;
+const siteImageDocs = {banner:"image_banner",allImage:"image_all",brImage:"image_br",csImage:"image_cs",lwImage:"image_lw",ltwImage:"image_ltw",lwndImage:"image_lwnd",hpImage:"image_1hp",freeImage:"image_free"};
+const siteImageValues = {};
+const siteImageStops = [];
 
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
@@ -169,7 +172,7 @@ $("authForm").addEventListener("submit", async event => {
       if (!name || !ffUID || !phone) throw new Error("সব Player তথ্য পূরণ করো।");
       const credential = await createUserWithEmailAndPassword(auth, email, password);
       await setDoc(doc(db, C.users, credential.user.uid), {
-        uid:credential.user.uid, email, name, ffUID, phone, createdAt:serverTimestamp()
+        uid:credential.user.uid, email, name, ffUID, phone, balance:0, createdAt:serverTimestamp()
       });
       await sendEmailVerification(credential.user);
       await signOut(auth);
@@ -239,6 +242,8 @@ async function loadPlayerProfile(user) {
     $("playerName").textContent = profile.name || user.displayName || "Player";
     $("playerEmail").textContent = user.email || "";
     $("playerFFUID").textContent = profile.ffUID ? `Free Fire UID: ${profile.ffUID}` : "";
+    $("playerBalance").textContent = Number.isFinite(Number(profile.balance)) ? Number(profile.balance).toLocaleString() : "0";
+    loadPlayerBalanceHistory(user.uid);
   } catch (error) { console.error("Profile load:", error); }
 }
 
@@ -309,10 +314,10 @@ async function joinTournament(id) {
   if (!currentUser.emailVerified) { toast("আগে email verify করো।"); return; }
   const tournament=tournaments.find(item => item.id===id);
   if (!tournament || tournament.status!=="open") { toast("এই Tournament এখন Join করা যাচ্ছে না।"); return; }
-  if (tournament.entryFee !== 0) { toast("এই সাইটে শুধু free entry চালু আছে।"); return; }
+  if (tournament.entryFee !== 0) { toast("এই সাইটে এখন টুর্নামেন্টে কোনো প্রবেশ ফি নেই।"); return; }
   $("joinTournamentId").value=id;
   $("joinTitle").textContent=tournament.name || "Join tournament";
-  $("joinDetails").textContent=`${tournament.mode||"BR"} • FREE ENTRY • ${tournament.matchTime||"Time pending"}`;
+  $("joinDetails").textContent=`${tournament.mode||"BR"} • ${tournament.matchTime||"Time pending"}`;
   setMessage("joinMessage", "");
   try {
     const profile=await getDoc(doc(db,C.users,currentUser.uid));
@@ -443,9 +448,40 @@ function loadAdminPlayers() {
   const q=query(collection(db,C.users),orderBy("createdAt","desc"),limit(100));
   stops.adminPlayers=onSnapshot(q,snapshot=>{
     $("adminPlayers").innerHTML=snapshot.empty?'<div class="empty-state">No players yet.</div>':snapshot.docs.map(d=>{
-      const x=d.data();return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small></div></div>`;
+      const x=d.data(), balance=Number(x.balance||0);
+      return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small><small><b>Balance: ${balance.toLocaleString()} points</b></small></div><div class="admin-inline"><button class="small-btn" data-balance="${esc(d.id)}" data-action="add" type="button">Add</button><button class="small-btn danger" data-balance="${esc(d.id)}" data-action="deduct" type="button">Deduct</button></div></div>`;
     }).join("");
+    document.querySelectorAll("[data-balance]").forEach(b=>b.onclick=()=>adjustPlayerBalance(b.dataset.balance,b.dataset.action));
   },error=>{$("adminPlayers").textContent="Player list load হয়নি: "+error.message;console.error(error);});
+}
+async function adjustPlayerBalance(uid,action) {
+  if(!isAdmin || !uid) return;
+  const raw=prompt(action==="add"?"কত points যোগ করবে?":"কত points কমাবে?");
+  if(raw===null)return;
+  const amount=Number(raw);
+  if(!Number.isSafeInteger(amount)||amount<=0){toast("শুধু 1 বা তার বেশি পূর্ণসংখ্যা points লিখো।");return;}
+  const userRef=doc(db,C.users,uid), logRef=doc(collection(db,C.balanceHistory));
+  try {
+    await runTransaction(db,async tx=>{
+      const snap=await tx.get(userRef);
+      if(!snap.exists())throw new Error("Player account পাওয়া যায়নি।");
+      const oldBalance=Number(snap.data().balance||0), next=action==="add"?oldBalance+amount:oldBalance-amount;
+      if(next<0)throw new Error("Balance শূন্যের নিচে করা যাবে না।");
+      tx.update(userRef,{balance:next,balanceUpdatedAt:serverTimestamp()});
+      tx.set(logRef,{uid,amount:action==="add"?amount:-amount,previousBalance:oldBalance,newBalance:next,action,adminUid:currentUser.uid,createdAt:serverTimestamp()});
+    });
+    toast("Player balance updated.");
+  } catch(error){console.error("Balance update:",error);toast(error.message||"Balance update failed.");}
+}
+async function loadPlayerBalanceHistory(uid) {
+  try {
+    const q=query(collection(db,C.balanceHistory),where("uid","==",uid),orderBy("createdAt","desc"),limit(20));
+    const snap=await getDocs(q);
+    $("playerBalanceHistory").innerHTML=snap.empty?'<div class="empty-state">No balance activity yet.</div>':snap.docs.map(d=>{
+      const x=d.data(),amount=Number(x.amount||0);
+      return `<div class="list-row"><div><b>${amount>0?"+":""}${amount} points</b><small>${esc(x.action||"Balance update")} • ${niceDate(x.createdAt)}</small></div><span class="status ${amount>=0?"approved":"rejected"}">${Number(x.newBalance||0)} total</span></div>`;
+    }).join("");
+  } catch(error){console.error("Balance history:",error);$("playerBalanceHistory").textContent="Balance history load হয়নি: "+error.message;}
 }
 
 function fillResultTournamentOptions() {
@@ -508,9 +544,13 @@ function loadSettings() {
     const d=snapshot.exists()?snapshot.data():{};
     $("noticeArea").classList.toggle("hidden",!d.notice);
     $("noticeText").textContent=d.notice||"";
-    const banner=safeUrl(d.banner)||d.bannerData;
+    $("adminPayName").textContent=d.payName||"Admin Pay Name not set";
+    $("adminPayInfo").textContent=d.payInfo||"Admin Pay Info not set";
+    $("editPayName").classList.toggle("hidden",!isAdmin);
+    $("editPayInfo").classList.toggle("hidden",!isAdmin);
+    const banner=safeUrl(d.banner)||siteImageValues.banner||"";
     $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428aa),url("${banner}")`:"";
-    const categoryImages={All:d.allImage,BR:d.brImage,CS:d.csImage,LW:d.lwImage,LTW:d.ltwImage,LWND:d.lwndImage,"1HP":d.hpImage,FREE:d.freeImage};
+    const categoryImages={All:siteImageValues.allImage,BR:siteImageValues.brImage,CS:siteImageValues.csImage,LW:siteImageValues.lwImage,LTW:siteImageValues.ltwImage,LWND:siteImageValues.lwndImage,"1HP":siteImageValues.hpImage,FREE:siteImageValues.freeImage};
     document.querySelectorAll(".category-card[data-category]").forEach(card=>{
       const art=card.querySelector(".category-art");if(!art)return;
       const image=categoryImages[card.dataset.category];
@@ -524,33 +564,61 @@ function loadSettings() {
     ].filter(Boolean);
     $("contactDetails").innerHTML=contacts.join("")||"Contact information will be updated by admin.";
     if(isAdmin){
+      $("sPayName").value=d.payName||"";$("sPayInfo").value=d.payInfo||"";
       $("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";
       $("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";
       $("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";
-      const previewValues={sBannerPreview:d.bannerData||safeUrl(d.banner),sAllPreview:d.allImage,sBRPreview:d.brImage,sCSPreview:d.csImage,sLWPreview:d.lwImage,sLTWPreview:d.ltwImage,sLWNDPreview:d.lwndImage,s1HPPreview:d.hpImage,sFREEPreview:d.freeImage};
+      const previewValues={sBannerPreview:siteImageValues.banner||safeUrl(d.banner),sAllPreview:siteImageValues.allImage,sBRPreview:siteImageValues.brImage,sCSPreview:siteImageValues.csImage,sLWPreview:siteImageValues.lwImage,sLTWPreview:siteImageValues.ltwImage,sLWNDPreview:siteImageValues.lwndImage,s1HPPreview:siteImageValues.hpImage,sFREEPreview:siteImageValues.freeImage};
       Object.entries(previewValues).forEach(([id,src])=>{const el=$(id);if(src){el.src=src;el.classList.remove("hidden");}else{el.removeAttribute("src");el.classList.add("hidden");}});
     }
   },error=>{console.error("Settings:",error);});
 }
 loadSettings();
+Object.entries(siteImageDocs).forEach(([key,docId])=>{
+  const stop=onSnapshot(doc(db,C.settings,docId),snapshot=>{
+    siteImageValues[key]=snapshot.exists()?snapshot.data().data||"":"";
+    if(key==="banner"){
+      const d=siteImageValues.banner;
+      $("home").style.backgroundImage=d?`linear-gradient(110deg,#080d1cf5,#0a1428aa),url("${d}")`:"";
+      if(isAdmin&&d){$("sBannerPreview").src=d;$("sBannerPreview").classList.remove("hidden");}
+    }else{
+      const category=({allImage:"All",brImage:"BR",csImage:"CS",lwImage:"LW",ltwImage:"LTW",lwndImage:"LWND",hpImage:"1HP",freeImage:"FREE"})[key];
+      const card=document.querySelector(`.category-card[data-category="${category}"]`);
+      const art=card?.querySelector(".category-art");
+      if(art) art.style.backgroundImage=siteImageValues[key]?`linear-gradient(#07132655,#07132655),url("${siteImageValues[key]}")`:"";
+      const previewId=({allImage:"sAllPreview",brImage:"sBRPreview",csImage:"sCSPreview",lwImage:"sLWPreview",ltwImage:"sLTWPreview",lwndImage:"sLWNDPreview",hpImage:"s1HPPreview",freeImage:"sFREEPreview"})[key];
+      const preview=$(previewId);
+      if(isAdmin&&preview&&siteImageValues[key]){preview.src=siteImageValues[key];preview.classList.remove("hidden");}
+    }
+  },error=>console.error("Category image load failed:",docId,error));
+  siteImageStops.push(stop);
+});
+
+async function editAdminPayField(field,label) {
+  if(!isAdmin)return;
+  const current=$(field==="payName"?"adminPayName":"adminPayInfo").textContent;
+  const value=prompt(`${label} লিখো:`,current.includes("not set")?"":current);
+  if(value===null)return;
+  try { await setDoc(doc(db,C.settings,"public"),{[field]:value.trim(),updatedAt:serverTimestamp()},{merge:true});toast(`${label} updated.`); }
+  catch(error){toast(error.message||"Update failed.");}
+}
+$("editPayName").addEventListener("click",()=>editAdminPayField("payName","Admin Pay Name"));
+$("editPayInfo").addEventListener("click",()=>editAdminPayField("payInfo","Admin Pay Info"));
+
 $("settingsForm").addEventListener("submit",async event=>{
   event.preventDefault();if(!isAdmin)return;
   try {
     await setDoc(doc(db,C.settings,"public"),{
+      payName:$("sPayName").value.trim(),payInfo:$("sPayInfo").value.trim(),
       notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),
       whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),
-      youtube:$("sYoutube").value.trim(),banner:pendingSiteImages.banner?"":$("sBanner").value.trim(),
-      ...(pendingSiteImages.banner?{bannerData:pendingSiteImages.banner}:{}),
-      ...(pendingSiteImages.allImage?{allImage:pendingSiteImages.allImage}:{}),
-      ...(pendingSiteImages.brImage?{brImage:pendingSiteImages.brImage}:{}),
-      ...(pendingSiteImages.csImage?{csImage:pendingSiteImages.csImage}:{}),
-      ...(pendingSiteImages.lwImage?{lwImage:pendingSiteImages.lwImage}:{}),
-      ...(pendingSiteImages.ltwImage?{ltwImage:pendingSiteImages.ltwImage}:{}),
-      ...(pendingSiteImages.lwndImage?{lwndImage:pendingSiteImages.lwndImage}:{}),
-      ...(pendingSiteImages.hpImage?{hpImage:pendingSiteImages.hpImage}:{}),
-      ...(pendingSiteImages.freeImage?{freeImage:pendingSiteImages.freeImage}:{}),
+      youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),
       updatedAt:serverTimestamp()
     },{merge:true});
+    // Save each photo in its own Firestore document so a group of photos cannot exceed the 1 MiB document limit.
+    for(const [key,data] of Object.entries(pendingSiteImages)){
+      if(data) await setDoc(doc(db,C.settings,siteImageDocs[key]),{data,updatedAt:serverTimestamp()},{merge:true});
+    }
     Object.keys(pendingSiteImages).forEach(key=>pendingSiteImages[key]=null);
     imagePickers.forEach(([inputId])=>$(inputId).value="");
     toast("Website settings saved. Reload করলেও ছবিগুলো থাকবে।");
