@@ -30,7 +30,7 @@
       <p class="eyebrow">AE FREE FIRE OFFICIAL TOURNAMENT ARENA</p>
       <p class="hero-kicker">PLAY • COMPETE • WIN</p>
       <h1>FIGHT FOR<br><span>THE BOOYAH!</span></h1>
-      <p class="hero-description">Join free tournaments, compete with other players and prove your skills.</p>
+      <p class="hero-description">Join tournaments, compete with other players and prove your skills.</p>
       <div class="hero-actions"><a class="btn btn-primary" href="#tournaments">JOIN MATCH</a><button id="heroSignup" class="btn btn-outline" type="button">CREATE ACCOUNT</button></div>
       <div class="hero-foot"><span>⚡ DAILY MATCHES</span><span>🏆 TOURNAMENTS</span><span>🎮 FAIR PLAY</span></div>
     </div>
@@ -40,7 +40,7 @@
   <section id="noticeArea" class="notice-wrap hidden"><b>📢 NOTICE</b><span id="noticeText"></span></section>
 
   <section class="section" id="tournaments">
-    <div class="section-heading"><div><p class="eyebrow">CHOOSE YOUR BATTLE</p><h2>WELCOME TO AE FREE FIRE</h2></div><span class="section-tag">FREE ENTRY</span></div>
+    <div class="section-heading"><div><p class="eyebrow">CHOOSE YOUR BATTLE</p><h2>WELCOME TO AE FREE FIRE</h2></div><div class="admin-pay-card" id="adminPayCard"><div class="admin-pay-heading">ADMIN PAY</div><div class="admin-pay-line"><span id="adminPayName">Admin Pay Name not set</span><button id="editPayName" class="small-btn hidden" type="button">EDIT</button></div><div class="admin-pay-line"><span id="adminPayInfo">Admin Pay Info not set</span><button id="editPayInfo" class="small-btn hidden" type="button">EDIT</button></div></div></div>
     <div class="category-grid">
       <button class="category-card active" data-category="All" type="button"><span class="category-art art-all">ALL</span><b>ALL MATCHES</b><small id="countAll">0 matches</small></button>
       <button class="category-card" data-category="BR" type="button"><span class="category-art art-br" id="brCategoryArt">BR</span><b>BR MATCH</b><small id="countBR">0 matches</small></button>
@@ -59,8 +59,8 @@
     <div class="section-heading"><div><p class="eyebrow">PLAYER ACCOUNT</p><h2>MY MATCHES</h2></div></div>
     <div id="signedOutMatches" class="panel muted-panel">Login to view your profile and tournament requests.</div>
     <div id="playerArea" class="hidden">
-      <div class="player-card panel"><div><small>PLAYER PROFILE</small><h3 id="playerName">Player</h3><p id="playerEmail"></p><p id="playerFFUID"></p></div><span class="player-icon">🎮</span></div>
-      <div class="panel"><h3>MY TOURNAMENT REQUESTS</h3><div id="myTournaments" class="simple-list">Loading your entries…</div></div>
+      <div class="player-card panel"><div><small>PLAYER PROFILE</small><h3 id="playerName">Player</h3><p id="playerEmail"></p><p id="playerFFUID"></p><p class="player-balance">ACCOUNT BALANCE: <strong id="playerBalance">0</strong> points</p></div><span class="player-icon">🎮</span></div>
+      <div class="panel"><h3>BALANCE HISTORY</h3><div id="playerBalanceHistory" class="simple-list">No balance activity yet.</div></div><div class="panel"><h3>MY TOURNAMENT REQUESTS</h3><div id="myTournaments" class="simple-list">Loading your entries…</div></div>
     </div>
   </section>
 
@@ -117,9 +117,9 @@
     <div id="tabPlayers" class="admin-panel panel hidden"><h3>Player Accounts</h3><div id="adminPlayers" class="simple-list">Loading players…</div></div>
 
     <div id="tabSettings" class="admin-panel panel hidden">
-      <h3>Website Content</h3>
+      <h3>Website Content & Admin Pay</h3>
       <form id="settingsForm" class="form-grid">
-        <label class="full">Announcement / Notice<input id="sNotice" maxlength="300"></label>
+        <label>Admin Pay Name<input id="sPayName" maxlength="60" placeholder="Name shown to players"></label><label>Admin Pay Info<input id="sPayInfo" maxlength="100" placeholder="Payment/contact information"></label><label class="full">Announcement / Notice<input id="sNotice" maxlength="300"></label>
         <label>Contact phone<input id="sPhone" maxlength="25"></label>
         <label>WhatsApp link<input id="sWhatsApp" type="url"></label>
         <label>Facebook link<input id="sFacebook" type="url"></label>
@@ -157,12 +157,12 @@
 </dialog>
 
 <dialog id="joinDialog" class="modal">
-  <button class="modal-close" data-close="joinDialog" type="button">×</button><p class="eyebrow">FREE TOURNAMENT ENTRY</p><h2 id="joinTitle">Join tournament</h2><p id="joinDetails" class="muted"></p>
+  <button class="modal-close" data-close="joinDialog" type="button">×</button><p class="eyebrow">TOURNAMENT JOIN</p><h2 id="joinTitle">Join tournament</h2><p id="joinDetails" class="muted"></p>
   <form id="joinForm"><input type="hidden" id="joinTournamentId">
     <label>Player / Team name<input id="joinPlayerName" required maxlength="50"></label>
     <label>Free Fire UID<input id="joinFFUID" required maxlength="30"></label>
     <label>Contact number<input id="joinContact" required maxlength="20"></label>
-    <button class="btn btn-primary full-width" type="submit">Send Free Join Request</button><p id="joinMessage" class="form-message" aria-live="polite"></p>
+    <button class="btn btn-primary full-width" type="submit">Send Join Request</button><p id="joinMessage" class="form-message" aria-live="polite"></p>
   </form>
 </dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
