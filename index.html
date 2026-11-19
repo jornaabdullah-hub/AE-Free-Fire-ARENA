@@ -43,8 +43,8 @@
     <div class="section-heading"><div><p class="eyebrow">CHOOSE YOUR BATTLE</p><h2>WELCOME TO AE FREE FIRE</h2></div><span class="section-tag">FREE ENTRY</span></div>
     <div class="category-grid">
       <button class="category-card active" data-category="All" type="button"><span class="category-art art-all">ALL</span><b>ALL MATCHES</b><small id="countAll">0 matches</small></button>
-      <button class="category-card" data-category="BR" type="button"><span class="category-art art-br">BR</span><b>BR MATCH</b><small id="countBR">0 matches</small></button>
-      <button class="category-card" data-category="CS" type="button"><span class="category-art art-cs">CS</span><b>CLASH SQUAD</b><small id="countCS">0 matches</small></button>
+      <button class="category-card" data-category="BR" type="button"><span class="category-art art-br" id="brCategoryArt">BR</span><b>BR MATCH</b><small id="countBR">0 matches</small></button>
+      <button class="category-card" data-category="CS" type="button"><span class="category-art art-cs" id="csCategoryArt">CS</span><b>CLASH SQUAD</b><small id="countCS">0 matches</small></button>
       <button class="category-card" data-category="LW" type="button"><span class="category-art art-lw">LW</span><b>LONE WOLF</b><small id="countLW">0 matches</small></button>
       <button class="category-card" data-category="LTW" type="button"><span class="category-art art-ltw">LTW</span><b>LOSE TO WIN</b><small id="countLTW">0 matches</small></button>
       <button class="category-card" data-category="LWND" type="button"><span class="category-art art-lwnd">ND</span><b>LW NO DAMAGE</b><small id="countLWND">0 matches</small></button>
@@ -124,7 +124,10 @@
         <label>WhatsApp link<input id="sWhatsApp" type="url"></label>
         <label>Facebook link<input id="sFacebook" type="url"></label>
         <label>YouTube link<input id="sYoutube" type="url"></label>
-        <label class="full">Home banner image URL<input id="sBanner" type="url"></label>
+        <label class="full">Home banner image URL (optional)<input id="sBanner" type="url" placeholder="https://…"></label>
+        <label class="full">Upload / change home banner photo<input id="sBannerFile" type="file" accept="image/*"><small class="image-help">Select a photo from your phone. It will be resized before saving.</small><img id="sBannerPreview" class="settings-preview hidden" alt="Home banner preview"></label>
+        <label>BR card photo<input id="sBRFile" type="file" accept="image/*"><small class="image-help">BR লেখা ছবির উপরে থাকবে</small><img id="sBRPreview" class="settings-preview hidden" alt="BR preview"></label>
+        <label>CS card photo<input id="sCSFile" type="file" accept="image/*"><small class="image-help">CS লেখা ছবির উপরে থাকবে</small><img id="sCSPreview" class="settings-preview hidden" alt="CS preview"></label>
         <div class="form-actions full"><button class="btn btn-primary" type="submit">Save Website Settings</button></div>
       </form>
     </div>
@@ -143,7 +146,7 @@
     <label>Password<input id="authPassword" type="password" minlength="6" required autocomplete="current-password"></label>
     <label id="ffWrap" class="hidden">Free Fire UID<input id="authFFUID" maxlength="30"></label>
     <label id="phoneWrap" class="hidden">Contact number<input id="authPhone" maxlength="20"></label>
-    <button class="btn btn-primary full-width" id="authSubmit" type="submit">Login</button><p id="authMessage" class="form-message" aria-live="polite"></p>
+    <button class="btn btn-primary full-width" id="authSubmit" type="submit">Login</button><button class="btn btn-outline full-width" id="resendVerification" type="button">Resend Verification Email</button><p id="authMessage" class="form-message" aria-live="polite"></p>
   </form><button id="switchAuth" class="text-button" type="button">Create a new account</button>
 </dialog>
 
