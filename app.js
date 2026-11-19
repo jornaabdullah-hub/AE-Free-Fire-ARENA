@@ -16,12 +16,11 @@ const db = getFirestore(app);
 const $ = id => document.getElementById(id);
 const C = {
   tournaments: "tournaments", users: "users", registrations: "registrations",
-  results: "results", settings: "site_settings", balanceHistory: "balance_history"
+  results: "results", settings: "site_settings", balanceHistory: "balance_history", moneyRequests: "money_requests"
 };
 let currentUser = null, isAdmin = false, tournaments = [], activeCategory = "All";
-let adminPayDisplayName = "Not set", adminPayDisplayInfo = "Not set";
 let authIsSignup = false, adminLoginRequested = false;
-let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null };
+let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null, adminMoneyRequests:null };
 let toastTimer = null;
 const siteImageDocs = {banner:"image_banner",allImage:"image_all",brImage:"image_br",csImage:"image_cs",lwImage:"image_lw",ltwImage:"image_ltw",lwndImage:"image_lwnd",hpImage:"image_1hp",freeImage:"image_free"};
 const siteImageValues = {};
@@ -220,10 +219,10 @@ onIdTokenChanged(auth, async user => {
   $("signedOutMatches").classList.toggle("hidden", !!user);
   $("playerArea").classList.toggle("hidden", !user);
   stopListener("mine");
-  stopListener("adminEntries"); stopListener("adminPlayers"); stopListener("adminResults");
+  stopListener("adminEntries"); stopListener("adminPlayers"); stopListener("adminResults"); stopListener("adminMoneyRequests");
   if (user) {
     await loadPlayerProfile(user);
-    loadMyEntries(user);
+    loadMyEntries(user); loadMyMoneyRequests(user.uid);
   } else {
     $("myTournaments").innerHTML = "";
     $("playerName").textContent = "Player";
@@ -231,7 +230,7 @@ onIdTokenChanged(auth, async user => {
     $("playerFFUID").textContent = "";
   }
   if (isAdmin) {
-    loadAdminEntries(); loadAdminPlayers(); loadAdminResults();
+    loadAdminEntries(); loadAdminPlayers(); loadAdminResults(); loadAdminMoneyRequests();
     renderAdminTournaments(); fillResultTournamentOptions(); loadSettings();
   }
 });
@@ -288,7 +287,7 @@ function renderTournaments() {
       <p>${esc(t.description||"Join the battle and play fair.")}</p>
       <div class="meta-grid">
         <div class="meta"><small>CATEGORY</small><b>${esc(t.mode||"BR")}</b></div>
-        <div class="meta"><small>ADMIN PAY</small><b>${esc(adminPayDisplayName)}${adminPayDisplayInfo && adminPayDisplayInfo !== "Not set" ? ` · ${esc(adminPayDisplayInfo)}` : ""}</b></div>
+        <div class="meta"><small>ENTRY</small><b>FREE</b></div>
         <div class="meta"><small>REWARD INFO</small><b>${esc(t.prizeInfo||"—")}</b></div>
         <div class="meta"><small>MATCH TIME</small><b>${esc(t.matchTime||"To be announced")}</b></div>
         <div class="meta"><small>SLOTS</small><b>${Number(t.slots||0)}</b></div>
@@ -382,12 +381,12 @@ function renderAdminTournaments() {
 function editTournament(id) {
   const t=tournaments.find(item=>item.id===id); if(!t)return;
   $("tournamentId").value=id;$("tName").value=t.name||"";$("tMode").value=t.mode||"BR";
-  $("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";
+  $("tFee").value="0";$("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";
   $("tSlots").value=t.slots||48;$("tImage").value=t.imageUrl||"";$("tDescription").value=t.description||"";
   $("tWhatsApp").value=t.whatsapp||"";$("tTelegram").value=t.telegram||"";$("tStatus").value=t.status||"open";
   $("tabTournament").scrollIntoView({behavior:"smooth"});
 }
-$("tReset").addEventListener("click",()=>{$("tournamentForm").reset();$("tournamentId").value="";});
+$("tReset").addEventListener("click",()=>{$("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";});
 $("tournamentForm").addEventListener("submit",async event=>{
   event.preventDefault(); if(!isAdmin)return;
   try {
@@ -403,7 +402,7 @@ $("tournamentForm").addEventListener("submit",async event=>{
     if(!payload.name||payload.slots<2||payload.slots>1000)throw new Error("Tournament তথ্য ঠিকভাবে পূরণ করো।");
     if(id) await updateDoc(doc(db,C.tournaments,id),payload);
     else await addDoc(collection(db,C.tournaments),{...payload,createdAt:serverTimestamp()});
-    $("tournamentForm").reset();$("tournamentId").value="";toast("Tournament saved.");
+    $("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";toast("Tournament saved.");
   } catch(error) { toast(error.message||"Tournament save failed."); }
 });
 async function deleteTournament(id) {
@@ -485,6 +484,46 @@ async function loadPlayerBalanceHistory(uid) {
   } catch(error){console.error("Balance history:",error);$("playerBalanceHistory").textContent="Balance history load হয়নি: "+error.message;}
 }
 
+async function loadMyMoneyRequests(uid) {
+  try {
+    const q=query(collection(db,C.moneyRequests),where("uid","==",uid),limit(30));
+    const snap=await getDocs(q);
+    const rows=snap.docs.sort((a,b)=>(b.data().createdAt?.seconds||0)-(a.data().createdAt?.seconds||0));
+    $("myMoneyRequests").innerHTML=snap.empty?'<div class="empty-state">No requests yet.</div>':rows.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.type)} • ${Number(x.amount||0)}</b><small>${esc(x.details||"")} • ${niceDate(x.createdAt)}</small></div><span class="status ${(x.status||"Pending").toLowerCase()}">${esc(x.status||"Pending")}</span></div>`;}).join("");
+  } catch(e){console.error(e);$("myMoneyRequests").textContent="Requests could not be loaded.";}
+}
+$("moneyRequestForm").addEventListener("submit",async e=>{
+  e.preventDefault(); if(!currentUser){toast("আগে Login করো।");return;}
+  const amount=Number($("moneyRequestAmount").value), type=$("moneyRequestType").value, details=$("moneyRequestDetails").value.trim();
+  if(!Number.isSafeInteger(amount)||amount<1||!details){toast("সঠিক amount ও details দাও।");return;}
+  try { await addDoc(collection(db,C.moneyRequests),{uid:currentUser.uid,email:currentUser.email||"",type,amount,details,status:"Pending",createdAt:serverTimestamp()}); $("moneyRequestForm").reset();toast("Request submitted. Admin review করবে।");loadMyMoneyRequests(currentUser.uid); }
+  catch(err){console.error(err);toast(err.message||"Request submit failed.");}
+});
+function loadAdminMoneyRequests(){
+  stopListener("adminMoneyRequests");
+  const q=query(collection(db,C.moneyRequests),orderBy("createdAt","desc"),limit(100));
+  stops.adminMoneyRequests=onSnapshot(q,snap=>{
+    $("adminMoneyRequests").innerHTML=snap.empty?'<div class="empty-state">No deposit / withdraw requests.</div>':snap.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.type)} • ${Number(x.amount||0)}</b><small>${esc(x.email)} • ${esc(x.details||"")}</small><small>${niceDate(x.createdAt)} • ${esc(x.status||"Pending")}</small></div><div class="admin-inline">${x.status==="Pending"?`<button class="small-btn" data-money-review="${esc(d.id)}" data-state="Approved" type="button">Approve</button><button class="small-btn danger" data-money-review="${esc(d.id)}" data-state="Rejected" type="button">Reject</button>`:`<span class="status ${(x.status||"").toLowerCase()}">${esc(x.status)}</span>`}</div></div>`;}).join("");
+    document.querySelectorAll("[data-money-review]").forEach(b=>b.onclick=()=>reviewMoneyRequest(b.dataset.moneyReview,b.dataset.state));
+  },err=>{console.error(err);$("adminMoneyRequests").textContent="Requests load হয়নি: "+err.message;});
+}
+async function reviewMoneyRequest(id,status){
+  if(!isAdmin||!id||!confirm(`${status} করবে?`))return;
+  const reqRef=doc(db,C.moneyRequests,id), logRef=doc(collection(db,C.balanceHistory));
+  try{await runTransaction(db,async tx=>{
+    const rs=await tx.get(reqRef);if(!rs.exists()||rs.data().status!=="Pending")throw new Error("Request already reviewed.");
+    const x=rs.data();
+    if(status==="Approved"){
+      const userRef=doc(db,C.users,x.uid),us=await tx.get(userRef);if(!us.exists())throw new Error("Player account পাওয়া যায়নি।");
+      const old=Number(us.data().balance||0),delta=x.type==="Deposit"?Number(x.amount):-Number(x.amount),next=old+delta;
+      if(next<0)throw new Error("Player balance যথেষ্ট নয়।");
+      tx.update(userRef,{balance:next,balanceUpdatedAt:serverTimestamp()});
+      tx.set(logRef,{uid:x.uid,amount:delta,previousBalance:old,newBalance:next,action:`${x.type} approved`,adminUid:currentUser.uid,createdAt:serverTimestamp()});
+    }
+    tx.update(reqRef,{status,reviewedAt:serverTimestamp(),reviewedBy:currentUser.uid});
+  });toast(`Request ${status.toLowerCase()} হয়েছে।`);}catch(err){console.error(err);toast(err.message||"Review failed.");}
+}
+
 function fillResultTournamentOptions() {
   const select=$("rTournament"), previous=select.value;
   select.innerHTML=tournaments.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
@@ -545,13 +584,11 @@ function loadSettings() {
     const d=snapshot.exists()?snapshot.data():{};
     $("noticeArea").classList.toggle("hidden",!d.notice);
     $("noticeText").textContent=d.notice||"";
-    adminPayDisplayName=d.payName||"Not set";
-    adminPayDisplayInfo=d.payInfo||"Not set";
     $("adminPayName").textContent=d.payName||"Admin Pay Name not set";
     $("adminPayInfo").textContent=d.payInfo||"Admin Pay Info not set";
-    renderTournaments();
     $("editPayName").classList.toggle("hidden",!isAdmin);
     $("editPayInfo").classList.toggle("hidden",!isAdmin);
+    $("moneyInstructions").innerHTML=`<div class="list-row"><div><b>DEPOSIT</b><small>${esc(d.depositInfo||"Admin has not added deposit instructions yet.")}</small></div></div><div class="list-row"><div><b>WITHDRAW</b><small>${esc(d.withdrawInfo||"Admin has not added withdraw instructions yet.")}</small></div></div>`;
     const banner=safeUrl(d.banner)||siteImageValues.banner||"";
     $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428aa),url("${banner}")`:"";
     const categoryImages={All:siteImageValues.allImage,BR:siteImageValues.brImage,CS:siteImageValues.csImage,LW:siteImageValues.lwImage,LTW:siteImageValues.ltwImage,LWND:siteImageValues.lwndImage,"1HP":siteImageValues.hpImage,FREE:siteImageValues.freeImage};
@@ -568,7 +605,7 @@ function loadSettings() {
     ].filter(Boolean);
     $("contactDetails").innerHTML=contacts.join("")||"Contact information will be updated by admin.";
     if(isAdmin){
-      $("sPayName").value=d.payName||"";$("sPayInfo").value=d.payInfo||"";
+      $("sDepositInfo").value=d.depositInfo||"";$("sWithdrawInfo").value=d.withdrawInfo||"";
       $("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";
       $("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";
       $("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";
@@ -613,7 +650,7 @@ $("settingsForm").addEventListener("submit",async event=>{
   event.preventDefault();if(!isAdmin)return;
   try {
     await setDoc(doc(db,C.settings,"public"),{
-      payName:$("sPayName").value.trim(),payInfo:$("sPayInfo").value.trim(),
+      depositInfo:$("sDepositInfo").value.trim(),withdrawInfo:$("sWithdrawInfo").value.trim(),
       notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),
       whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),
       youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),
