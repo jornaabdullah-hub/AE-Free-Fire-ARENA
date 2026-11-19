@@ -53,6 +53,42 @@ function safeUrl(value) {
   catch { return ""; }
 }
 
+// Resize selected photos so the three website images remain small enough for Firestore.
+function compressImageFile(file) {
+  return new Promise((resolve,reject)=>{
+    if(!file || !file.type.startsWith("image/")) return reject(new Error("একটি image file নির্বাচন করো।"));
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error("ছবি পড়া যায়নি। আবার চেষ্টা করো।"));
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error("ছবিটি খোলা যাচ্ছে না।"));
+      img.onload=()=>{
+        const maxW=900,maxH=600,scale=Math.min(1,maxW/img.width,maxH/img.height);
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));
+        const ctx=canvas.getContext("2d");ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        let data=canvas.toDataURL("image/jpeg",0.62);
+        if(data.length>260000) data=canvas.toDataURL("image/jpeg",0.42);
+        if(data.length>300000) return reject(new Error("ছবিটি অনেক বড়। ছোট সাইজের ছবি ব্যবহার করো।"));
+        resolve(data);
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+const pendingSiteImages={banner:null,brImage:null,csImage:null};
+function setupImagePicker(inputId,previewId,key){
+  $(inputId).addEventListener("change",async()=>{
+    const file=$(inputId).files?.[0];if(!file)return;
+    try{const data=await compressImageFile(file);pendingSiteImages[key]=data;$(previewId).src=data;$(previewId).classList.remove("hidden");}
+    catch(error){pendingSiteImages[key]=null;$(inputId).value="";toast(error.message||"ছবি প্রস্তুত করা যায়নি।");}
+  });
+}
+setupImagePicker("sBannerFile","sBannerPreview","banner");
+setupImagePicker("sBRFile","sBRPreview","brImage");
+setupImagePicker("sCSFile","sCSPreview","csImage");
+
 document.querySelectorAll("[data-close]").forEach(button => {
   button.addEventListener("click", () => closeDialog(button.dataset.close));
 });
@@ -80,11 +116,40 @@ function showAuth(signup) {
   $("authSubmit").textContent = signup ? "Create Account" : "Login";
   ["nameWrap","ffWrap","phoneWrap"].forEach(id => $(id).classList.toggle("hidden", !signup));
   $("authPassword").autocomplete = signup ? "new-password" : "current-password";
+  $("resendVerification").classList.toggle("hidden", signup);
   $("switchAuth").classList.remove("hidden");
   $("switchAuth").textContent = signup ? "Already have an account? Login" : "Create a new account";
   setMessage("authMessage", "");
   showDialog("authDialog");
 }
+
+$("resendVerification").addEventListener("click", async () => {
+  const email = $("authEmail").value.trim().toLowerCase();
+  const password = $("authPassword").value;
+  if (!email || !password) {
+    setMessage("authMessage", "আগে Email ও Password লিখে তারপর Verify Email পাঠাও।");
+    return;
+  }
+  const button = $("resendVerification");
+  button.disabled = true;
+  try {
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    await credential.user.reload();
+    if (credential.user.emailVerified) {
+      setMessage("authMessage", "এই Email আগেই Verify করা হয়েছে। এখন Login করো।");
+    } else {
+      await sendEmailVerification(credential.user);
+      setMessage("authMessage", "নতুন Verification Email পাঠানো হয়েছে। Gmail Inbox বা Spam দেখো।");
+    }
+    await signOut(auth);
+  } catch (error) {
+    setMessage("authMessage", error.code === "auth/too-many-requests"
+      ? "অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করো।"
+      : (error.message || "Verification Email পাঠানো যায়নি।"));
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $("authForm").addEventListener("submit", async event => {
   event.preventDefault();
@@ -438,8 +503,11 @@ function loadSettings() {
     const d=snapshot.exists()?snapshot.data():{};
     $("noticeArea").classList.toggle("hidden",!d.notice);
     $("noticeText").textContent=d.notice||"";
-    const banner=safeUrl(d.banner);
-    $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428cc),url("${banner}")`:"";
+    const banner=safeUrl(d.banner)||d.bannerData;
+    $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428aa),url("${banner}")`:"";
+    const brArt=$("brCategoryArt"),csArt=$("csCategoryArt");
+    if(brArt){brArt.style.backgroundImage=d.brImage?`linear-gradient(#07132655,#07132655),url("${d.brImage}")`:"";brArt.textContent="BR";}
+    if(csArt){csArt.style.backgroundImage=d.csImage?`linear-gradient(#07132655,#07132655),url("${d.csImage}")`:"";csArt.textContent="CS";}
     const contacts=[
       d.phone?`<a href="tel:${esc(d.phone)}">Phone: ${esc(d.phone)}</a>`:"",
       d.whatsapp?`<a target="_blank" rel="noopener" href="${esc(safeUrl(d.whatsapp))}">WhatsApp</a>`:"",
@@ -451,6 +519,8 @@ function loadSettings() {
       $("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";
       $("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";
       $("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";
+      const previews=[["sBannerPreview",d.bannerData||safeUrl(d.banner)],["sBRPreview",d.brImage||""],["sCSPreview",d.csImage||""]];
+      previews.forEach(([id,src])=>{const el=$(id);if(src){el.src=src;el.classList.remove("hidden");}else{el.removeAttribute("src");el.classList.add("hidden");}});
     }
   },error=>{console.error("Settings:",error);});
 }
@@ -461,9 +531,14 @@ $("settingsForm").addEventListener("submit",async event=>{
     await setDoc(doc(db,C.settings,"public"),{
       notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),
       whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),
-      youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),
+      youtube:$("sYoutube").value.trim(),banner:pendingSiteImages.banner?"":$("sBanner").value.trim(),
+      ...(pendingSiteImages.banner?{bannerData:pendingSiteImages.banner}:{}),
+      ...(pendingSiteImages.brImage?{brImage:pendingSiteImages.brImage}:{}),
+      ...(pendingSiteImages.csImage?{csImage:pendingSiteImages.csImage}:{}),
       updatedAt:serverTimestamp()
     },{merge:true});
+    pendingSiteImages.banner=null;pendingSiteImages.brImage=null;pendingSiteImages.csImage=null;
+    ["sBannerFile","sBRFile","sCSFile"].forEach(id=>$(id).value="");
     toast("Website settings saved.");
   } catch(error) { toast(error.message||"Settings save failed."); }
 });
