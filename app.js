@@ -110,8 +110,18 @@ $("authForm").addEventListener("submit", async event => {
       await credential.user.reload();
       await getIdToken(credential.user, true);
       if (!credential.user.emailVerified) {
+        // Send a fresh verification email whenever an unverified user tries to log in.
+        try {
+          await sendEmailVerification(credential.user);
+        } catch (verificationError) {
+          await signOut(auth);
+          if (verificationError.code === "auth/too-many-requests") {
+            throw new Error("অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার Login করে Verify Email পাঠাও।");
+          }
+          throw new Error("Verification email পাঠানো যায়নি: " + (verificationError.message || "আবার চেষ্টা করো।"));
+        }
         await signOut(auth);
-        throw new Error("আগে email verification সম্পন্ন করে আবার Login করো।");
+        throw new Error("তোমার Gmail-এ নতুন Verify Email পাঠানো হয়েছে। Inbox বা Spam থেকে Verify করে আবার Login করো।");
       }
       if (adminLoginRequested && !isAdminUser(credential.user)) {
         await signOut(auth);
