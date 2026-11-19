@@ -1,286 +1,449 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendEmailVerification } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+import {
+  getAuth, onIdTokenChanged, getIdToken, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut, sendEmailVerification
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+import {
+  getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc,
+  updateDoc, deleteDoc, query, where, orderBy, onSnapshot,
+  serverTimestamp, limit
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 import { firebaseConfig, ADMIN_EMAIL } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const $ = id => document.getElementById(id);
+const C = {
+  tournaments: "tournaments", users: "users", registrations: "registrations",
+  results: "results", settings: "site_settings"
+};
 let currentUser = null, isAdmin = false, tournaments = [], activeCategory = "All";
-let stopTournaments = null, stopSettings = null, stopMine = null, stopResults = null;
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const dateText = v => { try { return v?.toDate ? v.toDate().toLocaleString() : new Date(v).toLocaleString(); } catch { return "Date pending"; } };
-function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),2400); }
-function msg(id,value){ $(id).textContent=value; }
-function open(id){ $(id).showModal(); }
-function close(id){ $(id).close(); }
-function adminUser(user){ return !!user && user.emailVerified && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase(); }
+let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null };
+let toastTimer = null;
 
-document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>close(b.dataset.close)));
-$("year").textContent = new Date().getFullYear();
-$("menuToggle").onclick=()=>$("mainNav").classList.toggle("open");
-document.querySelectorAll("#mainNav a").forEach(a=>a.addEventListener("click",()=>$("mainNav").classList.remove("open")));
-$("loginOpen").onclick=()=>showAuth(false);
-$("signupOpen").onclick=()=>showAuth(true);
-$("heroSignup").onclick=()=>showAuth(true);
-$("switchAuth").onclick=()=>showAuth($("authTitle").textContent==="Player Login");
-$("logoutBtn").onclick=()=>signOut(auth);
-
-function showAuth(signup){
-  $("authTitle").textContent=signup?"Create Player Account":"Player Login";
-  $("authSubmit").textContent=signup?"Create Account":"Login";
-  $("nameWrap").classList.toggle("hidden",!signup); $("ffWrap").classList.toggle("hidden",!signup); $("phoneWrap").classList.toggle("hidden",!signup);
-  $("authPassword").autocomplete=signup?"new-password":"current-password";
-  $("switchAuth").textContent=signup?"Already have an account? Login":"Create a new account";
-  msg("authMessage",""); open("authDialog");
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+}[ch]));
+const niceDate = value => {
+  if (!value) return "To be announced";
+  try {
+    const d = value?.toDate ? value.toDate() : new Date(value);
+    return Number.isNaN(d.getTime()) ? "To be announced" : d.toLocaleString();
+  } catch { return "To be announced"; }
+};
+function toast(message) {
+  $("toast").textContent = message;
+  $("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("toast").classList.remove("show"), 2800);
 }
-$("authForm").addEventListener("submit",async e=>{
-  e.preventDefault(); const signup=$("authTitle").textContent!=="Player Login";
-  const email=$("authEmail").value.trim().toLowerCase(), password=$("authPassword").value, btn=$("authSubmit");
-  btn.disabled=true;
-  try{
-    if(signup){
+function setMessage(id, message) { $(id).textContent = message; }
+function showDialog(id) { const el=$(id); if (!el.open) el.showModal(); }
+function closeDialog(id) { const el=$(id); if (el.open) el.close(); }
+function isAdminUser(user) {
+  return !!user && user.emailVerified && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+}
+function stopListener(key) {
+  if (stops[key]) { stops[key](); stops[key] = null; }
+}
+function safeUrl(value) {
+  try { const u=new URL(value); return ["https:","http:"].includes(u.protocol) ? u.href : ""; }
+  catch { return ""; }
+}
+
+document.querySelectorAll("[data-close]").forEach(button => {
+  button.addEventListener("click", () => closeDialog(button.dataset.close));
+});
+$("year").textContent = new Date().getFullYear();
+$("menuToggle").addEventListener("click", () => $("mainNav").classList.toggle("open"));
+document.querySelectorAll("#mainNav a").forEach(a => a.addEventListener("click", () => $("mainNav").classList.remove("open")));
+$("loginOpen").addEventListener("click", () => showAuth(false));
+$("signupOpen").addEventListener("click", () => showAuth(true));
+$("heroSignup").addEventListener("click", () => showAuth(true));
+$("logoutBtn").addEventListener("click", async () => {
+  try { await signOut(auth); toast("Logged out."); } catch (e) { toast(e.message); }
+});
+$("switchAuth").addEventListener("click", () => showAuth($("authTitle").textContent === "Player Login"));
+
+function showAuth(signup) {
+  $("authTitle").textContent = signup ? "Create Player Account" : "Player Login";
+  $("authSubmit").textContent = signup ? "Create Account" : "Login";
+  ["nameWrap","ffWrap","phoneWrap"].forEach(id => $(id).classList.toggle("hidden", !signup));
+  $("authPassword").autocomplete = signup ? "new-password" : "current-password";
+  $("switchAuth").textContent = signup ? "Already have an account? Login" : "Create a new account";
+  setMessage("authMessage", "");
+  showDialog("authDialog");
+}
+
+$("authForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const signup = $("authTitle").textContent !== "Player Login";
+  const button = $("authSubmit");
+  const email = $("authEmail").value.trim().toLowerCase();
+  const password = $("authPassword").value;
+  button.disabled = true;
+  try {
+    if (signup) {
       const name=$("authName").value.trim(), ffUID=$("authFFUID").value.trim(), phone=$("authPhone").value.trim();
-      if(!name||!ffUID||!phone) throw Error("সব Player তথ্য পূরণ করো।");
-      const cred=await createUserWithEmailAndPassword(auth,email,password);
-      await setDoc(doc(db,"users",cred.user.uid),{uid:cred.user.uid,email,name,ffUID,phone,createdAt:serverTimestamp()});
-      await sendEmailVerification(cred.user);
-      msg("authMessage","Account তৈরি হয়েছে। Email verification link পাঠানো হয়েছে।");
-      toast("Email verify করে আবার login করো।");
-      await signOut(auth); return;
+      if (!name || !ffUID || !phone) throw new Error("সব Player তথ্য পূরণ করো।");
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      await setDoc(doc(db, C.users, credential.user.uid), {
+        uid:credential.user.uid, email, name, ffUID, phone, createdAt:serverTimestamp()
+      });
+      await sendEmailVerification(credential.user);
+      await signOut(auth);
+      setMessage("authMessage", "Account তৈরি হয়েছে। Email-এর verification link খুলে তারপর Login করো।");
+      toast("Verification email পাঠানো হয়েছে।");
+    } else {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      await credential.user.reload();
+      await getIdToken(credential.user, true);
+      if (!credential.user.emailVerified) {
+        await signOut(auth);
+        throw new Error("আগে email verification সম্পন্ন করে আবার Login করো।");
+      }
+      closeDialog("authDialog");
+      toast("Login successful.");
     }
-    const cred=await signInWithEmailAndPassword(auth,email,password);
-    await cred.user.reload();
-    if(email===ADMIN_EMAIL && !cred.user.emailVerified){await signOut(auth);throw Error("Admin access-এর আগে email verify করতে হবে।");}
-    close("authDialog"); toast("Login successful.");
-  }catch(err){msg("authMessage",err.message||"Authentication failed.");}
-  finally{btn.disabled=false;}
+  } catch (error) {
+    setMessage("authMessage", error.message || "Authentication failed.");
+  } finally { button.disabled=false; }
 });
 
-onAuthStateChanged(auth,async user=>{
-  currentUser=user; isAdmin=adminUser(user);
-  $("loginOpen").classList.toggle("hidden",!!user);
-  $("signupOpen").classList.toggle("hidden",!!user);
-  $("logoutBtn").classList.toggle("hidden",!user);
-  $("adminSection").classList.toggle("hidden",!isAdmin);
-  $("signedOutMatches").classList.toggle("hidden",!!user);
-  $("myTournaments").classList.toggle("hidden",!user);
-  if(stopMine){stopMine();stopMine=null;}
-  if(user) loadMyEntries(); else $("myTournaments").innerHTML="";
-  if(isAdmin){loadAdminPlayers();renderAdminTournaments();loadAdminEntries();loadAdminResults();}
+onIdTokenChanged(auth, async user => {
+  currentUser = user;
+  isAdmin = isAdminUser(user);
+  $("loginOpen").classList.toggle("hidden", !!user);
+  $("signupOpen").classList.toggle("hidden", !!user);
+  $("logoutBtn").classList.toggle("hidden", !user);
+  $("adminSection").classList.toggle("hidden", !isAdmin);
+  $("signedOutMatches").classList.toggle("hidden", !!user);
+  $("playerArea").classList.toggle("hidden", !user);
+  stopListener("mine");
+  stopListener("adminEntries"); stopListener("adminPlayers"); stopListener("adminResults");
+  if (user) {
+    await loadPlayerProfile(user);
+    loadMyEntries(user);
+  } else {
+    $("myTournaments").innerHTML = "";
+    $("playerName").textContent = "Player";
+    $("playerEmail").textContent = "";
+    $("playerFFUID").textContent = "";
+  }
+  if (isAdmin) {
+    loadAdminEntries(); loadAdminPlayers(); loadAdminResults();
+    renderAdminTournaments(); fillResultTournamentOptions(); loadSettings();
+  }
 });
 
-function watchTournaments(){
-  stopTournaments=onSnapshot(query(collection(db,"tournaments"),orderBy("createdAt","desc")),snap=>{
-    tournaments=snap.docs.map(d=>({id:d.id,...d.data()})); renderTournaments();
-    if(isAdmin){renderAdminTournaments();fillResultTournamentOptions();}
-  },err=>{$("tournamentGrid").innerHTML='<div class="empty-state">Tournament load হয়নি। Firestore Rules দেখো।</div>';console.error(err);});
+async function loadPlayerProfile(user) {
+  try {
+    const snapshot = await getDoc(doc(db, C.users, user.uid));
+    const profile = snapshot.exists() ? snapshot.data() : {};
+    $("playerName").textContent = profile.name || user.displayName || "Player";
+    $("playerEmail").textContent = user.email || "";
+    $("playerFFUID").textContent = profile.ffUID ? `Free Fire UID: ${profile.ffUID}` : "";
+  } catch (error) { console.error("Profile load:", error); }
+}
+
+function watchTournaments() {
+  stopListener("tournaments");
+  const q = query(collection(db, C.tournaments), orderBy("createdAt", "desc"));
+  stops.tournaments = onSnapshot(q, snapshot => {
+    tournaments = snapshot.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderTournaments();
+    if (isAdmin) { renderAdminTournaments(); fillResultTournamentOptions(); }
+  }, error => {
+    console.error("Tournament listener:", error);
+    $("tournamentGrid").innerHTML = '<div class="panel empty-state">Tournament load হয়নি। Firebase Rules ও Console error পরীক্ষা করো।</div>';
+  });
 }
 watchTournaments();
 
-function renderTournaments(){
-  const list=tournaments.filter(t=>activeCategory==="All"||t.mode===activeCategory);
-  if(!list.length){$("tournamentGrid").innerHTML='<div class="empty-state">এখন কোনো Tournament নেই। পরে আবার দেখো।</div>';return;}
-  $("tournamentGrid").innerHTML=list.map(t=>`
-    <article class="tournament-card">
-      <div class="tournament-banner" style="${t.imageUrl?`background-image:linear-gradient(#07132666,#07132699),url('${esc(t.imageUrl)}')`:""}">${t.imageUrl?"":esc(t.mode||"BR")}</div>
-      <div class="tournament-content"><h3>${esc(t.name)}</h3><p>${esc(t.description||"Join the battle and play fair.")}</p>
+function updateCategoryCounts() {
+  const counts = { All:tournaments.length };
+  tournaments.forEach(t => counts[t.mode]=(counts[t.mode]||0)+1);
+  $("countAll").textContent = `${counts.All||0} matches`;
+  ["BR","CS","LW","LTW","LWND","1HP","FREE"].forEach(mode => {
+    const node=$("count"+mode);
+    if (node) node.textContent = `${counts[mode]||0} matches`;
+  });
+}
+function renderTournaments() {
+  updateCategoryCounts();
+  const labels = {All:"ALL TOURNAMENTS",BR:"BR MATCHES",CS:"CLASH SQUAD",LW:"LONE WOLF",LTW:"LOSE TO WIN",LWND:"LW NO DAMAGE","1HP":"1 HP MODE",FREE:"FREE MATCHES"};
+  $("selectedCategoryTitle").textContent = labels[activeCategory] || "ALL TOURNAMENTS";
+  const list=tournaments.filter(t => activeCategory==="All" || t.mode===activeCategory);
+  if (!list.length) {
+    $("tournamentGrid").innerHTML='<div class="panel empty-state">এখন কোনো Tournament নেই। Admin নতুন Tournament তৈরি করলে এখানে দেখা যাবে।</div>';
+    return;
+  }
+  $("tournamentGrid").innerHTML = list.map(t => {
+    const image=safeUrl(t.imageUrl);
+    return `<article class="tournament-card">
+      <div class="tournament-banner" ${image?`style="background-image:linear-gradient(#07132666,#07132699),url('${esc(image)}')"`:""}>${image?"":esc(t.mode||"BR")}</div>
+      <div class="tournament-content"><h3>${esc(t.name||"Tournament")}</h3>
+      <p>${esc(t.description||"Join the battle and play fair.")}</p>
       <div class="meta-grid">
         <div class="meta"><small>CATEGORY</small><b>${esc(t.mode||"BR")}</b></div>
         <div class="meta"><small>ENTRY</small><b>FREE</b></div>
-        <div class="meta"><small>PRIZE INFO</small><b>${esc(t.prizeInfo||"—")}</b></div>
+        <div class="meta"><small>REWARD INFO</small><b>${esc(t.prizeInfo||"—")}</b></div>
         <div class="meta"><small>MATCH TIME</small><b>${esc(t.matchTime||"To be announced")}</b></div>
         <div class="meta"><small>SLOTS</small><b>${Number(t.slots||0)}</b></div>
         <div class="meta"><small>STATUS</small><b>${t.status==="open"?"Open":"Closed"}</b></div>
       </div>
       <button class="btn btn-primary full-width" data-join="${esc(t.id)}" ${t.status!=="open"?"disabled":""}>${t.status==="open"?"REQUEST TO JOIN":"CLOSED"}</button></div>
-    </article>`).join("");
-  document.querySelectorAll("[data-join]").forEach(b=>b.onclick=()=>joinTournament(b.dataset.join));
+    </article>`;
+  }).join("");
+  document.querySelectorAll("[data-join]").forEach(button => button.addEventListener("click", () => joinTournament(button.dataset.join)));
 }
-document.querySelectorAll("[data-category]").forEach(b=>b.onclick=()=>{
-  activeCategory=b.dataset.category;
-  document.querySelectorAll("[data-category]").forEach(x=>x.classList.toggle("active",x===b));
+document.querySelectorAll("[data-category]").forEach(button => button.addEventListener("click", () => {
+  activeCategory=button.dataset.category;
+  document.querySelectorAll("[data-category]").forEach(item => item.classList.toggle("active", item===button));
+  renderTournaments();
+}));
+$("showAllMatches").addEventListener("click", () => {
+  activeCategory="All";
+  document.querySelectorAll("[data-category]").forEach(item => item.classList.toggle("active", item.dataset.category==="All"));
   renderTournaments();
 });
 
-async function joinTournament(id){
-  if(!currentUser){showAuth(false);return;}
-  if(!currentUser.emailVerified){toast("আগে email verify করে আবার login করো।");return;}
-  const t=tournaments.find(x=>x.id===id); if(!t||t.status!=="open")return;
-  if(t.entryFee!==0 && t.entryFee!==undefined){toast("এই ওয়েবসাইটে শুধু free entry চালু আছে।");return;}
-  $("joinTournamentId").value=id; $("joinTitle").textContent=t.name;
-  $("joinDetails").textContent=`${t.mode} • FREE ENTRY • ${t.matchTime||"Time pending"}`;
-  msg("joinMessage","");
-  try{const p=await getDoc(doc(db,"users",currentUser.uid));const d=p.data()||{};
-    $("joinPlayerName").value=d.name||"";$("joinFFUID").value=d.ffUID||"";$("joinContact").value=d.phone||"";
-  }catch{}
-  open("joinDialog");
+async function joinTournament(id) {
+  if (!currentUser) { showAuth(false); return; }
+  if (!currentUser.emailVerified) { toast("আগে email verify করো।"); return; }
+  const tournament=tournaments.find(item => item.id===id);
+  if (!tournament || tournament.status!=="open") { toast("এই Tournament এখন Join করা যাচ্ছে না।"); return; }
+  if (tournament.entryFee !== 0) { toast("এই সাইটে শুধু free entry চালু আছে।"); return; }
+  $("joinTournamentId").value=id;
+  $("joinTitle").textContent=tournament.name || "Join tournament";
+  $("joinDetails").textContent=`${tournament.mode||"BR"} • FREE ENTRY • ${tournament.matchTime||"Time pending"}`;
+  setMessage("joinMessage", "");
+  try {
+    const profile=await getDoc(doc(db,C.users,currentUser.uid));
+    const data=profile.exists()?profile.data():{};
+    $("joinPlayerName").value=data.name||"";
+    $("joinFFUID").value=data.ffUID||"";
+    $("joinContact").value=data.phone||"";
+  } catch (error) { console.warn("Player details unavailable:",error); }
+  showDialog("joinDialog");
 }
-$("joinForm").onsubmit=async e=>{
-  e.preventDefault();const btn=e.submitter;btn.disabled=true;
-  try{
+
+$("joinForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const button=event.submitter;
+  button.disabled=true;
+  try {
+    if (!currentUser || !currentUser.emailVerified) throw new Error("Login করে verified email ব্যবহার করো।");
     const tournamentId=$("joinTournamentId").value;
-    const t=tournaments.find(x=>x.id===tournamentId); if(!t||t.status!=="open")throw Error("Tournament বন্ধ হয়ে গেছে।");
-    const existing=await getDocs(query(collection(db,"registrations"),where("playerUid","==",currentUser.uid),where("tournamentId","==",tournamentId),limit(1)));
-    if(!existing.empty)throw Error("তুমি ইতিমধ্যে request পাঠিয়েছ।");
-    await addDoc(collection(db,"registrations"),{
-      playerUid:currentUser.uid,email:currentUser.email,tournamentId,tournamentName:t.name,mode:t.mode,
-      playerName:$("joinPlayerName").value.trim(),ffUID:$("joinFFUID").value.trim(),contact:$("joinContact").value.trim(),
-      status:"Pending",createdAt:serverTimestamp()
+    const tournament=tournaments.find(item=>item.id===tournamentId);
+    if (!tournament || tournament.status!=="open" || tournament.entryFee!==0) throw new Error("Tournament বন্ধ বা unavailable।");
+    const ownRequests=await getDocs(query(collection(db,C.registrations),where("playerUid","==",currentUser.uid)));
+    const duplicate=ownRequests.docs.some(d=>d.data().tournamentId===tournamentId);
+    if (duplicate) throw new Error("এই Tournament-এ তোমার request আগেই আছে।");
+    await addDoc(collection(db,C.registrations), {
+      playerUid:currentUser.uid,email:currentUser.email,tournamentId,
+      tournamentName:tournament.name||"Tournament",mode:tournament.mode||"BR",
+      playerName:$("joinPlayerName").value.trim(),ffUID:$("joinFFUID").value.trim(),
+      contact:$("joinContact").value.trim(),status:"Pending",createdAt:serverTimestamp()
     });
-    msg("joinMessage","Join request পাঠানো হয়েছে। Admin approve করলে confirm হবে।");
-    toast("Request submitted."); setTimeout(()=>close("joinDialog"),1300);
-  }catch(err){msg("joinMessage",err.message||"Request পাঠানো যায়নি।");}
-  finally{btn.disabled=false;}
-};
+    setMessage("joinMessage","Join request পাঠানো হয়েছে। Admin review করবে।");
+    toast("Free join request submitted.");
+    setTimeout(()=>closeDialog("joinDialog"),1100);
+  } catch (error) { setMessage("joinMessage",error.message||"Request পাঠানো যায়নি।"); }
+  finally { button.disabled=false; }
+});
 
-function loadMyEntries(){
-  stopMine=onSnapshot(query(collection(db,"registrations"),where("playerUid","==",currentUser.uid),orderBy("createdAt","desc")),async snap=>{
-    if(snap.empty){$("myTournaments").innerHTML='<div class="empty-state">এখনো কোনো tournament request নেই।</div>';return;}
-    const rows=[];
-    for(const d of snap.docs){
-      const x=d.data();let room="";
-      if(x.status==="Approved"){
-        room=`<small>Room ID: ${esc(x.roomId||"Not published")} • Password: ${esc(x.roomPassword||"Not published")}</small>`;
-        if(x.whatsapp)room+=`<small><a target="_blank" rel="noopener" href="${esc(x.whatsapp)}">WhatsApp Group</a></small>`;
-        if(x.telegram)room+=`<small><a target="_blank" rel="noopener" href="${esc(x.telegram)}">Telegram Group</a></small>`;
-      }
-      rows.push(`<div class="list-row"><div><b>${esc(x.tournamentName)}</b><small>${esc(x.playerName)} • ${dateText(x.createdAt)}</small>${room}</div><span class="status ${x.status==="Approved"?"approved":x.status==="Rejected"?"rejected":""}">${esc(x.status||"Pending")}</span></div>`);
-    }
-    $("myTournaments").innerHTML=rows.join("");
-  },err=>{console.error(err);$("myTournaments").textContent="My matches load হয়নি।";});
-}
-
-function loadResults(){
-  stopResults=onSnapshot(query(collection(db,"results"),orderBy("publishedAt","desc")),snap=>{
-    $("resultsList").innerHTML=snap.empty?'<div class="empty-state">No results published yet.</div>':snap.docs.map(d=>{
-      const x=d.data();return `<div class="list-row"><div><b>${esc(x.tournamentName||"Tournament")}</b><small>Winner: ${esc(x.winner)} • ${esc(x.position||"")}</small><small>${esc(x.note||"")} • ${dateText(x.publishedAt)}</small></div><span class="status approved">Published</span></div>`;
+function loadMyEntries(user) {
+  stopListener("mine");
+  const q=query(collection(db,C.registrations),where("playerUid","==",user.uid));
+  stops.mine=onSnapshot(q,snapshot=>{
+    if (snapshot.empty) { $("myTournaments").innerHTML='<div class="empty-state">এখনও কোনো tournament request নেই।</div>'; return; }
+    const entries=snapshot.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    $("myTournaments").innerHTML=entries.map(entry=>{
+      const state=(entry.status||"Pending").toLowerCase();
+      const room=entry.status==="Approved" && (entry.roomId||entry.roomPassword);
+      const roomHtml=room?`<div class="room-info">Room ID: ${esc(entry.roomId||"Not shared")}<br>Room Password: ${esc(entry.roomPassword||"Not shared")}</div>`:"";
+      const links=[entry.whatsapp?`<a target="_blank" rel="noopener" href="${esc(safeUrl(entry.whatsapp))}">WhatsApp group</a>`:"",entry.telegram?`<a target="_blank" rel="noopener" href="${esc(safeUrl(entry.telegram))}">Telegram group</a>`:""].filter(Boolean).join(" · ");
+      return `<div class="list-row"><div><b>${esc(entry.tournamentName||"Tournament")}</b><small>${esc(entry.mode||"")} • Requested: ${esc(niceDate(entry.createdAt))}</small>${roomHtml}${links?`<small>${links}</small>`:""}</div><span class="status ${state}">${esc(entry.status||"Pending")}</span></div>`;
     }).join("");
-  },err=>console.error(err));
+  },error=>{console.error("My entries:",error);$("myTournaments").textContent="Entries load হয়নি।";});
 }
-loadResults();
 
-function renderAdminTournaments(){
-  if(!isAdmin)return;
-  $("adminTournamentList").innerHTML=tournaments.map(t=>`<div class="list-row"><div><b>${esc(t.name)}</b><small>${esc(t.mode)} • FREE • ${esc(t.matchTime||"")}</small></div><div class="admin-inline"><button class="small-btn" data-edit="${esc(t.id)}">Edit</button><button class="small-btn" data-match="${esc(t.id)}">Room details</button><button class="small-btn danger" data-delete="${esc(t.id)}">Delete</button></div></div>`).join("")||"No tournaments yet.";
-  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editTournament(b.dataset.edit));
-  document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=()=>deleteTournament(b.dataset.delete));
-  document.querySelectorAll("[data-match]").forEach(b=>b.onclick=()=>editMatchDetails(b.dataset.match));
+function renderAdminTournaments() {
+  if (!isAdmin) return;
+  if (!tournaments.length) { $("adminTournamentList").innerHTML='<div class="empty-state">No tournaments created yet.</div>'; return; }
+  $("adminTournamentList").innerHTML=tournaments.map(t=>`<div class="list-row"><div><b>${esc(t.name)}</b><small>${esc(t.mode)} • FREE • ${esc(t.status)}</small></div><div class="admin-inline"><button class="small-btn" data-edit-tournament="${esc(t.id)}" type="button">Edit</button><button class="small-btn danger" data-delete-tournament="${esc(t.id)}" type="button">Delete</button><button class="small-btn" data-room-tournament="${esc(t.id)}" type="button">Share Room</button></div></div>`).join("");
+  document.querySelectorAll("[data-edit-tournament]").forEach(b=>b.onclick=()=>editTournament(b.dataset.editTournament));
+  document.querySelectorAll("[data-delete-tournament]").forEach(b=>b.onclick=()=>deleteTournament(b.dataset.deleteTournament));
+  document.querySelectorAll("[data-room-tournament]").forEach(b=>b.onclick=()=>shareRoomDetails(b.dataset.roomTournament));
 }
-function editTournament(id){
-  const t=tournaments.find(x=>x.id===id);if(!t)return;
+function editTournament(id) {
+  const t=tournaments.find(item=>item.id===id); if(!t)return;
   $("tournamentId").value=id;$("tName").value=t.name||"";$("tMode").value=t.mode||"BR";
-  $("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";$("tSlots").value=t.slots||48;
-  $("tImage").value=t.imageUrl||"";$("tDescription").value=t.description||"";
+  $("tFee").value="0";$("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";
+  $("tSlots").value=t.slots||48;$("tImage").value=t.imageUrl||"";$("tDescription").value=t.description||"";
   $("tWhatsApp").value=t.whatsapp||"";$("tTelegram").value=t.telegram||"";$("tStatus").value=t.status||"open";
   $("tabTournament").scrollIntoView({behavior:"smooth"});
 }
-$("tReset").onclick=()=>{$("tournamentForm").reset();$("tournamentId").value="";};
-$("tournamentForm").onsubmit=async e=>{
-  e.preventDefault();if(!isAdmin)return;
-  try{
+$("tReset").addEventListener("click",()=>{$("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";});
+$("tournamentForm").addEventListener("submit",async event=>{
+  event.preventDefault(); if(!isAdmin)return;
+  try {
     const id=$("tournamentId").value;
-    const payload={name:$("tName").value.trim(),mode:$("tMode").value,entryFee:0,prizeInfo:$("tPrize").value.trim(),
-      matchTime:$("tTime").value?new Date($("tTime").value).toLocaleString():"To be announced",matchTimeInput:$("tTime").value,
-      slots:Number($("tSlots").value),imageUrl:$("tImage").value.trim(),description:$("tDescription").value.trim(),
-      whatsapp:$("tWhatsApp").value.trim(),telegram:$("tTelegram").value.trim(),status:$("tStatus").value,updatedAt:serverTimestamp()};
-    if(!payload.name||payload.slots<2)throw Error("Tournament তথ্য ঠিক করো।");
-    if(id)await updateDoc(doc(db,"tournaments",id),payload);
-    else await addDoc(collection(db,"tournaments"),{...payload,createdAt:serverTimestamp()});
-    $("tournamentForm").reset();$("tournamentId").value="";toast("Tournament saved.");
-  }catch(err){toast(err.message||"Save failed.");}
-};
-async function deleteTournament(id){
-  if(!confirm("এই tournament delete করবে?"))return;
-  try{await deleteDoc(doc(db,"tournaments",id));toast("Tournament deleted.");}catch(e){toast(e.message);}
+    const matchTimeInput=$("tTime").value;
+    const payload={
+      name:$("tName").value.trim(),mode:$("tMode").value,entryFee:0,
+      prizeInfo:$("tPrize").value.trim(),matchTime:matchTimeInput?new Date(matchTimeInput).toLocaleString():"To be announced",
+      matchTimeInput,slots:Number($("tSlots").value),imageUrl:$("tImage").value.trim(),
+      description:$("tDescription").value.trim(),whatsapp:$("tWhatsApp").value.trim(),
+      telegram:$("tTelegram").value.trim(),status:$("tStatus").value,updatedAt:serverTimestamp()
+    };
+    if(!payload.name||payload.slots<2||payload.slots>1000)throw new Error("Tournament তথ্য ঠিকভাবে পূরণ করো।");
+    if(id) await updateDoc(doc(db,C.tournaments,id),payload);
+    else await addDoc(collection(db,C.tournaments),{...payload,createdAt:serverTimestamp()});
+    $("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";toast("Tournament saved.");
+  } catch(error) { toast(error.message||"Tournament save failed."); }
+});
+async function deleteTournament(id) {
+  if(!isAdmin||!confirm("এই Tournament delete করবে?"))return;
+  try { await deleteDoc(doc(db,C.tournaments,id));toast("Tournament deleted."); }
+  catch(error) { toast(error.message||"Delete failed."); }
 }
-async function editMatchDetails(id){
-  const t=tournaments.find(x=>x.id===id);if(!t)return;
-  const roomId=prompt("Room ID (approved players only দেখতে পাবে):");if(roomId===null)return;
-  const roomPassword=prompt("Room password:");if(roomPassword===null)return;
-  try{
-    const snap=await getDocs(query(collection(db,"registrations"),where("tournamentId","==",id),where("status","==","Approved")));
-    const updates=snap.docs.map(d=>updateDoc(doc(db,"registrations",d.id),{
-      roomId:roomId.trim(),roomPassword:roomPassword.trim(),whatsapp:t.whatsapp||"",telegram:t.telegram||"",roomUpdatedAt:serverTimestamp()
-    }));
-    await Promise.all(updates);toast(`Approved players updated: ${updates.length}`);
-  }catch(e){toast(e.message||"Room details save হয়নি।");}
+async function shareRoomDetails(tournamentId) {
+  if(!isAdmin)return;
+  const roomId=prompt("Room ID লিখো (শুধু approved players দেখতে পাবে):");if(roomId===null)return;
+  const roomPassword=prompt("Room password লিখো:");if(roomPassword===null)return;
+  try {
+    const q=query(collection(db,C.registrations),where("tournamentId","==",tournamentId));
+    const snapshot=await getDocs(q);
+    const approved=snapshot.docs.filter(d=>d.data().status==="Approved");
+    await Promise.all(approved.map(d=>updateDoc(doc(db,C.registrations,d.id),{
+      roomId:roomId.trim(),roomPassword:roomPassword.trim(),roomUpdatedAt:serverTimestamp()
+    })));
+    toast(`Approved players updated: ${approved.length}`);
+  } catch(error) { toast(error.message||"Room details update failed."); }
 }
 
-function loadAdminEntries(){
-  onSnapshot(query(collection(db,"registrations"),orderBy("createdAt","desc")),snap=>{
-    $("adminEntries").innerHTML=snap.empty?"No join requests.":snap.docs.map(d=>{
-      const x=d.data();return `<div class="list-row"><div><b>${esc(x.tournamentName)} • ${esc(x.playerName)}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID)} • ${esc(x.contact)}</small><small>Status: ${esc(x.status)}</small></div><div class="admin-inline"><button class="small-btn" data-entry="${d.id}" data-state="Approved">Approve</button><button class="small-btn danger" data-entry="${d.id}" data-state="Rejected">Reject</button></div></div>`;
+function loadAdminEntries() {
+  stopListener("adminEntries");
+  const q=query(collection(db,C.registrations),orderBy("createdAt","desc"));
+  stops.adminEntries=onSnapshot(q,snapshot=>{
+    if(snapshot.empty){$("adminEntries").innerHTML='<div class="empty-state">No join requests.</div>';return;}
+    $("adminEntries").innerHTML=snapshot.docs.map(d=>{
+      const x=d.data();
+      return `<div class="list-row"><div><b>${esc(x.tournamentName)} • ${esc(x.playerName)}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID)} • Contact: ${esc(x.contact)}</small><small>Status: ${esc(x.status)}</small></div><div class="admin-inline">${x.status==="Pending"?`<button class="small-btn" data-review="${esc(d.id)}" data-state="Approved" type="button">Approve</button><button class="small-btn danger" data-review="${esc(d.id)}" data-state="Rejected" type="button">Reject</button>`:`<span class="status ${(x.status||"").toLowerCase()}">${esc(x.status)}</span>`}</div></div>`;
     }).join("");
-    document.querySelectorAll("[data-entry]").forEach(b=>b.onclick=()=>reviewEntry(b.dataset.entry,b.dataset.state));
-  },e=>{$("adminEntries").textContent="Requests load হয়নি।";console.error(e);});
+    document.querySelectorAll("[data-review]").forEach(b=>b.onclick=()=>reviewEntry(b.dataset.review,b.dataset.state));
+  },error=>{$("adminEntries").textContent="Requests load হয়নি: "+error.message;console.error(error);});
 }
-async function reviewEntry(id,status){
-  if(!isAdmin)return;if(!confirm(`${status} করবে?`))return;
-  try{await updateDoc(doc(db,"registrations",id),{status,reviewedAt:serverTimestamp(),reviewedBy:currentUser.uid});toast("Request updated.");}
-  catch(e){toast(e.message||"Update failed.");}
-}
-function loadAdminPlayers(){
-  onSnapshot(query(collection(db,"users"),orderBy("createdAt","desc"),limit(100)),snap=>{
-    $("adminPlayers").innerHTML=snap.empty?"No players yet.":snap.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small></div></div>`;}).join("");
-  },e=>{$("adminPlayers").textContent="Player list load হয়নি।";console.error(e);});
+async function reviewEntry(id,status) {
+  if(!isAdmin||!confirm(`${status} করবে?`))return;
+  try { await updateDoc(doc(db,C.registrations,id),{status,reviewedAt:serverTimestamp(),reviewedBy:currentUser.uid});toast("Request updated."); }
+  catch(error) { toast(error.message||"Request update failed."); }
 }
 
-function fillResultTournamentOptions(){
-  if(!$("rTournament"))return;
-  const old=$("rTournament").value;
-  $("rTournament").innerHTML=tournaments.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
-  if(old)$("rTournament").value=old;
+function loadAdminPlayers() {
+  stopListener("adminPlayers");
+  const q=query(collection(db,C.users),orderBy("createdAt","desc"),limit(100));
+  stops.adminPlayers=onSnapshot(q,snapshot=>{
+    $("adminPlayers").innerHTML=snapshot.empty?'<div class="empty-state">No players yet.</div>':snapshot.docs.map(d=>{
+      const x=d.data();return `<div class="list-row"><div><b>${esc(x.name||"Player")}</b><small>${esc(x.email)} • FF UID: ${esc(x.ffUID||"—")} • ${esc(x.phone||"")}</small></div></div>`;
+    }).join("");
+  },error=>{$("adminPlayers").textContent="Player list load হয়নি: "+error.message;console.error(error);});
 }
-function loadAdminResults(){
-  onSnapshot(query(collection(db,"results"),orderBy("publishedAt","desc")),snap=>{
-    $("adminResults").innerHTML=snap.empty?"No results yet.":snap.docs.map(d=>{const x=d.data();return `<div class="list-row"><div><b>${esc(x.tournamentName)}</b><small>${esc(x.winner)} • ${esc(x.position||"")}</small></div><div class="admin-inline"><button class="small-btn" data-result-edit="${d.id}">Edit</button><button class="small-btn danger" data-result-delete="${d.id}">Delete</button></div></div>`;}).join("");
-    document.querySelectorAll("[data-result-edit]").forEach(b=>b.onclick=()=>editResult(b.dataset.resultEdit));
-    document.querySelectorAll("[data-result-delete]").forEach(b=>b.onclick=()=>deleteResult(b.dataset.resultDelete));
-  },e=>console.error(e));
+
+function fillResultTournamentOptions() {
+  const select=$("rTournament"), previous=select.value;
+  select.innerHTML=tournaments.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  if(previous)select.value=previous;
 }
-$("resultForm").onsubmit=async e=>{
-  e.preventDefault();if(!isAdmin)return;
-  try{
-    const tid=$("rTournament").value,t=tournaments.find(x=>x.id===tid);if(!t)throw Error("Tournament নির্বাচন করো।");
-    const id=$("resultId").value,payload={tournamentId:tid,tournamentName:t.name,winner:$("rWinner").value.trim(),position:$("rPosition").value.trim(),note:$("rNote").value.trim(),updatedAt:serverTimestamp()};
-    if(id)await updateDoc(doc(db,"results",id),payload);else await addDoc(collection(db,"results"),{...payload,publishedAt:serverTimestamp()});
+function loadAdminResults() {
+  stopListener("adminResults");
+  const q=query(collection(db,C.results),orderBy("publishedAt","desc"));
+  stops.adminResults=onSnapshot(q,snapshot=>{
+    $("adminResults").innerHTML=snapshot.empty?'<div class="empty-state">No results published yet.</div>':snapshot.docs.map(d=>{
+      const x=d.data();return `<div class="list-row"><div><b>${esc(x.tournamentName)}</b><small>${esc(x.winner)} • ${esc(x.position||"")}</small></div><div class="admin-inline"><button class="small-btn" data-edit-result="${esc(d.id)}" type="button">Edit</button><button class="small-btn danger" data-delete-result="${esc(d.id)}" type="button">Delete</button></div></div>`;
+    }).join("");
+    document.querySelectorAll("[data-edit-result]").forEach(b=>b.onclick=()=>editResult(b.dataset.editResult));
+    document.querySelectorAll("[data-delete-result]").forEach(b=>b.onclick=()=>deleteResult(b.dataset.deleteResult));
+  },error=>{console.error("Admin results:",error);});
+}
+function watchPublicResults() {
+  stopListener("results");
+  stops.results=onSnapshot(query(collection(db,C.results),orderBy("publishedAt","desc")),snapshot=>{
+    $("resultsList").innerHTML=snapshot.empty?'<div class="panel muted-panel">Results will be published here by admin.</div>':snapshot.docs.map(d=>{
+      const x=d.data();return `<article class="list-row"><div><b>${esc(x.tournamentName||"Tournament")}</b><small>${esc(x.winner||"")} • ${esc(x.position||"")}<br>${esc(x.note||"")}</small></div><span class="status approved">PUBLISHED</span></article>`;
+    }).join("");
+  },error=>{console.error("Public results:",error);$("resultsList").innerHTML='<div class="panel muted-panel">Results load হয়নি।</div>';});
+}
+watchPublicResults();
+
+$("resultForm").addEventListener("submit",async event=>{
+  event.preventDefault();if(!isAdmin)return;
+  try {
+    const tournamentId=$("rTournament").value;
+    const tournament=tournaments.find(t=>t.id===tournamentId);if(!tournament)throw new Error("Tournament নির্বাচন করো।");
+    const id=$("resultId").value;
+    const payload={tournamentId,tournamentName:tournament.name,winner:$("rWinner").value.trim(),position:$("rPosition").value.trim(),note:$("rNote").value.trim(),updatedAt:serverTimestamp()};
+    if(!payload.winner)throw new Error("Winner name লিখো।");
+    if(id)await updateDoc(doc(db,C.results,id),payload);
+    else await addDoc(collection(db,C.results),{...payload,publishedAt:serverTimestamp()});
     $("resultForm").reset();$("resultId").value="";toast("Result published.");
-  }catch(err){toast(err.message||"Result save হয়নি।");}
-};
-async function editResult(id){
-  const d=await getDoc(doc(db,"results",id));if(!d.exists())return;const x=d.data();
-  $("resultId").value=id;$("rTournament").value=x.tournamentId||"";$("rWinner").value=x.winner||"";$("rPosition").value=x.position||"";$("rNote").value=x.note||"";
-  $("tabResults").scrollIntoView({behavior:"smooth"});
+  } catch(error) { toast(error.message||"Result save failed."); }
+});
+async function editResult(id) {
+  try {
+    const snapshot=await getDoc(doc(db,C.results,id));if(!snapshot.exists())return;
+    const x=snapshot.data();$("resultId").value=id;$("rTournament").value=x.tournamentId||"";
+    $("rWinner").value=x.winner||"";$("rPosition").value=x.position||"";$("rNote").value=x.note||"";
+    $("tabResults").scrollIntoView({behavior:"smooth"});
+  } catch(error) { toast(error.message); }
 }
-async function deleteResult(id){
-  if(!confirm("এই result delete করবে?"))return;
-  try{await deleteDoc(doc(db,"results",id));toast("Result deleted.");}catch(e){toast(e.message);}
+async function deleteResult(id) {
+  if(!isAdmin||!confirm("এই result delete করবে?"))return;
+  try { await deleteDoc(doc(db,C.results,id));toast("Result deleted."); }
+  catch(error) { toast(error.message||"Delete failed."); }
 }
-$("rReset").onclick=()=>{$("resultForm").reset();$("resultId").value="";};
+$("rReset").addEventListener("click",()=>{$("resultForm").reset();$("resultId").value="";});
 
-function loadSettings(){
-  if(stopSettings)stopSettings();
-  stopSettings=onSnapshot(doc(db,"site_settings","public"),s=>{
-    const d=s.data()||{};
-    if(d.notice){$("noticeArea").classList.remove("hidden");$("noticeText").textContent=d.notice;}else $("noticeArea").classList.add("hidden");
-    if(d.banner)$("home").style.backgroundImage=`linear-gradient(90deg,#080d1cf2,#080d1caa),url("${d.banner}")`;
-    else $("home").style.backgroundImage="";
-    $("contactDetails").innerHTML=[d.phone?`<a href="tel:${esc(d.phone)}">Phone: ${esc(d.phone)}</a>`:"",
-      d.whatsapp?`<a target="_blank" rel="noopener" href="${esc(d.whatsapp)}">WhatsApp</a>`:"",
-      d.facebook?`<a target="_blank" rel="noopener" href="${esc(d.facebook)}">Facebook</a>`:"",
-      d.youtube?`<a target="_blank" rel="noopener" href="${esc(d.youtube)}">YouTube</a>`:""].filter(Boolean).join("")||"Contact information will be updated by admin.";
-    if(isAdmin){$("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";$("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";$("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";}
-  },e=>console.error(e));
+function loadSettings() {
+  stopListener("settings");
+  stops.settings=onSnapshot(doc(db,C.settings,"public"),snapshot=>{
+    const d=snapshot.exists()?snapshot.data():{};
+    $("noticeArea").classList.toggle("hidden",!d.notice);
+    $("noticeText").textContent=d.notice||"";
+    const banner=safeUrl(d.banner);
+    $("home").style.backgroundImage=banner?`linear-gradient(110deg,#080d1cf5,#0a1428cc),url("${banner}")`:"";
+    const contacts=[
+      d.phone?`<a href="tel:${esc(d.phone)}">Phone: ${esc(d.phone)}</a>`:"",
+      d.whatsapp?`<a target="_blank" rel="noopener" href="${esc(safeUrl(d.whatsapp))}">WhatsApp</a>`:"",
+      d.facebook?`<a target="_blank" rel="noopener" href="${esc(safeUrl(d.facebook))}">Facebook</a>`:"",
+      d.youtube?`<a target="_blank" rel="noopener" href="${esc(safeUrl(d.youtube))}">YouTube</a>`:""
+    ].filter(Boolean);
+    $("contactDetails").innerHTML=contacts.join("")||"Contact information will be updated by admin.";
+    if(isAdmin){
+      $("sNotice").value=d.notice||"";$("sPhone").value=d.phone||"";
+      $("sWhatsApp").value=d.whatsapp||"";$("sFacebook").value=d.facebook||"";
+      $("sYoutube").value=d.youtube||"";$("sBanner").value=d.banner||"";
+    }
+  },error=>{console.error("Settings:",error);});
 }
 loadSettings();
-$("settingsForm").onsubmit=async e=>{
-  e.preventDefault();if(!isAdmin)return;
-  try{await setDoc(doc(db,"site_settings","public"),{notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),updatedAt:serverTimestamp()},{merge:true});toast("Website settings saved.");}
-  catch(err){toast(err.message||"Settings save failed.");}
-};
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===b));
-  ["tabTournament","tabEntries","tabResults","tabPlayers","tabSettings"].forEach(id=>$(id).classList.toggle("hidden",id!==b.dataset.tab));
+$("settingsForm").addEventListener("submit",async event=>{
+  event.preventDefault();if(!isAdmin)return;
+  try {
+    await setDoc(doc(db,C.settings,"public"),{
+      notice:$("sNotice").value.trim(),phone:$("sPhone").value.trim(),
+      whatsapp:$("sWhatsApp").value.trim(),facebook:$("sFacebook").value.trim(),
+      youtube:$("sYoutube").value.trim(),banner:$("sBanner").value.trim(),
+      updatedAt:serverTimestamp()
+    },{merge:true});
+    toast("Website settings saved.");
+  } catch(error) { toast(error.message||"Settings save failed."); }
 });
+
+document.querySelectorAll(".tab").forEach(button=>button.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(item=>item.classList.toggle("active",item===button));
+  ["tabTournament","tabEntries","tabResults","tabPlayers","tabSettings"].forEach(id=>$(id).classList.toggle("hidden",id!==button.dataset.tab));
+}));
