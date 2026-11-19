@@ -30,3 +30,4 @@
 .player-balance{margin-top:12px!important;color:var(--cyan)!important;font-weight:800}
 .player-balance strong{font-size:22px;color:#fff}
 @media(max-width:560px){.admin-pay-card{width:100%;max-width:none}.section-heading{align-items:flex-start;flex-direction:column;gap:12px}}
+.admin-pay-editor{margin:0 0 18px;max-width:100%}.money-request-form{margin-top:14px}.money-request-form .form-message{margin:0}
