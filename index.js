@@ -150,6 +150,6 @@
   </form>
 </dialog>
 <div id="toast" class="toast"></div>
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=admin-login-2"></script>
 </body>
 </html>
