@@ -1,40 +1,53 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedUser() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
     function admin() {
-      return signedIn()
-        && request.auth.token.email == "pctime310@gmail.com"
-        && request.auth.token.email_verified == true;
+      return verifiedUser()
+        && request.auth.token.email == "pctime310@gmail.com";
     }
 
     match /tournaments/{tournamentId} {
       allow read: if true;
-      allow create, update, delete: if admin()
+      allow create, update: if admin()
         && request.resource.data.entryFee == 0;
+      allow delete: if admin();
     }
 
     match /users/{uid} {
-      allow create: if signedIn() && request.auth.uid == uid
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
         && request.resource.data.email == request.auth.token.email;
       allow read: if admin() || (signedIn() && request.auth.uid == uid);
-      allow update: if admin() || (signedIn() && request.auth.uid == uid
+      allow update: if admin() || (
+        verifiedUser()
+        && request.auth.uid == uid
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.email == resource.data.email);
+        && request.resource.data.email == resource.data.email
+      );
       allow delete: if admin();
     }
 
     match /registrations/{registrationId} {
-      allow create: if signedIn()
+      allow create: if verifiedUser()
         && request.resource.data.playerUid == request.auth.uid
         && request.resource.data.status == "Pending"
         && request.resource.data.tournamentId is string
         && exists(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId))
         && get(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId)).data.status == "open"
         && get(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId)).data.entryFee == 0;
-      allow read: if admin() || (signedIn() && resource.data.playerUid == request.auth.uid);
-      allow update: if admin();
-      allow delete: if admin();
+      allow read: if admin()
+        || (signedIn() && resource.data.playerUid == request.auth.uid);
+      allow update, delete: if admin();
     }
 
     match /results/{resultId} {
@@ -42,7 +55,7 @@ service cloud.firestore {
       allow create, update, delete: if admin();
     }
 
-    match /site_settings/{docId} {
+    match /site_settings/{settingId} {
       allow read: if true;
       allow create, update, delete: if admin();
     }
