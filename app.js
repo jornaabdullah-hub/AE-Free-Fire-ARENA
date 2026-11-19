@@ -19,6 +19,7 @@ const C = {
   results: "results", settings: "site_settings", balanceHistory: "balance_history"
 };
 let currentUser = null, isAdmin = false, tournaments = [], activeCategory = "All";
+let adminPayDisplayName = "Not set", adminPayDisplayInfo = "Not set";
 let authIsSignup = false, adminLoginRequested = false;
 let stops = { tournaments:null, settings:null, mine:null, results:null, adminEntries:null, adminPlayers:null, adminResults:null };
 let toastTimer = null;
@@ -287,7 +288,7 @@ function renderTournaments() {
       <p>${esc(t.description||"Join the battle and play fair.")}</p>
       <div class="meta-grid">
         <div class="meta"><small>CATEGORY</small><b>${esc(t.mode||"BR")}</b></div>
-        <div class="meta"><small>ENTRY</small><b>FREE</b></div>
+        <div class="meta"><small>ADMIN PAY</small><b>${esc(adminPayDisplayName)}${adminPayDisplayInfo && adminPayDisplayInfo !== "Not set" ? ` · ${esc(adminPayDisplayInfo)}` : ""}</b></div>
         <div class="meta"><small>REWARD INFO</small><b>${esc(t.prizeInfo||"—")}</b></div>
         <div class="meta"><small>MATCH TIME</small><b>${esc(t.matchTime||"To be announced")}</b></div>
         <div class="meta"><small>SLOTS</small><b>${Number(t.slots||0)}</b></div>
@@ -381,12 +382,12 @@ function renderAdminTournaments() {
 function editTournament(id) {
   const t=tournaments.find(item=>item.id===id); if(!t)return;
   $("tournamentId").value=id;$("tName").value=t.name||"";$("tMode").value=t.mode||"BR";
-  $("tFee").value="0";$("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";
+  $("tPrize").value=t.prizeInfo||"";$("tTime").value=t.matchTimeInput||"";
   $("tSlots").value=t.slots||48;$("tImage").value=t.imageUrl||"";$("tDescription").value=t.description||"";
   $("tWhatsApp").value=t.whatsapp||"";$("tTelegram").value=t.telegram||"";$("tStatus").value=t.status||"open";
   $("tabTournament").scrollIntoView({behavior:"smooth"});
 }
-$("tReset").addEventListener("click",()=>{$("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";});
+$("tReset").addEventListener("click",()=>{$("tournamentForm").reset();$("tournamentId").value="";});
 $("tournamentForm").addEventListener("submit",async event=>{
   event.preventDefault(); if(!isAdmin)return;
   try {
@@ -402,7 +403,7 @@ $("tournamentForm").addEventListener("submit",async event=>{
     if(!payload.name||payload.slots<2||payload.slots>1000)throw new Error("Tournament তথ্য ঠিকভাবে পূরণ করো।");
     if(id) await updateDoc(doc(db,C.tournaments,id),payload);
     else await addDoc(collection(db,C.tournaments),{...payload,createdAt:serverTimestamp()});
-    $("tournamentForm").reset();$("tournamentId").value="";$("tFee").value="0";toast("Tournament saved.");
+    $("tournamentForm").reset();$("tournamentId").value="";toast("Tournament saved.");
   } catch(error) { toast(error.message||"Tournament save failed."); }
 });
 async function deleteTournament(id) {
@@ -544,8 +545,11 @@ function loadSettings() {
     const d=snapshot.exists()?snapshot.data():{};
     $("noticeArea").classList.toggle("hidden",!d.notice);
     $("noticeText").textContent=d.notice||"";
+    adminPayDisplayName=d.payName||"Not set";
+    adminPayDisplayInfo=d.payInfo||"Not set";
     $("adminPayName").textContent=d.payName||"Admin Pay Name not set";
     $("adminPayInfo").textContent=d.payInfo||"Admin Pay Info not set";
+    renderTournaments();
     $("editPayName").classList.toggle("hidden",!isAdmin);
     $("editPayInfo").classList.toggle("hidden",!isAdmin);
     const banner=safeUrl(d.banner)||siteImageValues.banner||"";
