@@ -3,42 +3,52 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function admin() {
-      return signedIn() && request.auth.token.email == "pctime310@gmail.com";
+      return signedIn()
+        && request.auth.token.email == "pctime310@gmail.com"
+        && request.auth.token.email_verified == true;
     }
-    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    match /tournaments/{tournamentId} {
+      allow read: if true;
+      allow create, update, delete: if admin()
+        && request.resource.data.entryFee == 0;
+    }
 
     match /users/{uid} {
-      allow create: if owner(uid)
-        && request.resource.data.uid == request.auth.uid
+      allow create: if signedIn() && request.auth.uid == uid
         && request.resource.data.email == request.auth.token.email;
-      allow read: if owner(uid) || admin();
+      allow read: if admin() || (signedIn() && request.auth.uid == uid);
+      allow update: if admin() || (signedIn() && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email);
+      allow delete: if admin();
+    }
+
+    match /registrations/{registrationId} {
+      allow create: if signedIn()
+        && request.resource.data.playerUid == request.auth.uid
+        && request.resource.data.status == "Pending"
+        && request.resource.data.tournamentId is string
+        && exists(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId))
+        && get(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId)).data.status == "open"
+        && get(/databases/$(database)/documents/tournaments/$(request.resource.data.tournamentId)).data.entryFee == 0;
+      allow read: if admin() || (signedIn() && resource.data.playerUid == request.auth.uid);
       allow update: if admin();
       allow delete: if admin();
     }
-    match /wallets/{uid} {
-      allow read: if owner(uid) || admin();
-      allow write: if false; // Only trusted Cloud Functions may change balances.
-    }
-    match /tournaments/{id} {
+
+    match /results/{resultId} {
       allow read: if true;
       allow create, update, delete: if admin();
     }
-    match /registrations/{id} {
-      allow read: if admin() || (signedIn() && resource.data.playerUid == request.auth.uid);
-      allow create, update, delete: if false; // Cloud Functions only.
-    }
-    match /transactions/{id} {
-      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow write: if false;
-    }
-    match /money_requests/{id} {
-      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if false; // Cloud Functions only.
-    }
-    match /site_settings/{id} {
+
+    match /site_settings/{docId} {
       allow read: if true;
-      allow write: if admin();
+      allow create, update, delete: if admin();
     }
-    match /{document=**} { allow read, write: if false; }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
