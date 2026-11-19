@@ -18,3 +18,15 @@
 
 /* Admin image upload previews and BR/CS category photos */
 .image-help{display:block;color:var(--muted);font-size:10px;line-height:1.5}.settings-preview{display:block;width:100%;max-width:360px;max-height:150px;object-fit:cover;border:1px solid var(--line);border-radius:9px;margin-top:7px}.category-art{background-size:cover;background-position:center;text-shadow:0 2px 8px #000;position:relative}.art-br,.art-cs{background-blend-mode:normal}
+
+/* Category photos are individual mini-banners; keep the category code visible over every photo. */
+.category-art{height:112px;background-size:cover;background-position:center;position:relative;display:grid;place-items:center;font-weight:900;letter-spacing:1px;color:#fff;text-shadow:0 3px 10px #000,0 1px 2px #000;isolation:isolate}
+.category-art:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#07132630,#07132688);z-index:-1}
+@media(max-width:560px){.category-art{height:92px}}
+
+.admin-pay-card{min-width:220px;max-width:360px;padding:12px 15px;border:1px solid #1d78a8;border-radius:12px;background:linear-gradient(145deg,#14233a,#0e1729);color:var(--text)}
+.admin-pay-heading{font:800 15px 'Barlow Condensed';letter-spacing:2px;color:var(--cyan);margin-bottom:7px}
+.admin-pay-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;overflow-wrap:anywhere}
+.player-balance{margin-top:12px!important;color:var(--cyan)!important;font-weight:800}
+.player-balance strong{font-size:22px;color:#fff}
+@media(max-width:560px){.admin-pay-card{width:100%;max-width:none}.section-heading{align-items:flex-start;flex-direction:column;gap:12px}}
